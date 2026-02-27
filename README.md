@@ -144,6 +144,82 @@ A rewritten architecture that separates background and foreground rendering via 
 
 ---
 
+## Differences between `lenny_clock` and `ella_clock`
+
+Both sketches produce the same visual output (time + date on a 32 × 16 matrix) but differ significantly in complexity and capability.
+
+### At a glance
+
+| Feature | `lenny_clock` | `ella_clock` |
+|---------|--------------|-------------|
+| Extra library | — | TaskScheduler |
+| Colour palettes | 3 hard-coded arrays (`pride`, `duke`, `yelp`) | 11 named, runtime-switchable palettes |
+| Background patterns | 6 functions called directly in `loop()` | 8 pattern callbacks managed by TaskScheduler |
+| Per-digit ink colour | Fixed (set per pattern function) | 4-element `ink_color[]` array, palette-driven |
+| RTC read | Every loop iteration (`update_digits()`) | Scheduled Task every 50 ms (`access_rtc()`) |
+| Date fields | Computed inside `date()` on each call | Cached in `date_array[]` by the scheduled task |
+| Loop style | Blocking — sequential + `delay(100)` | Non-blocking — `face_scheduler.execute()` |
+| Colon separator | None — digits fill fixed 8 px columns | Optional: shifts single-digit hour and draws colon dots |
+| DST detection | None | `check_dst()` for North American DST |
+| Brightness scaling | `update_brightness(float)` scales `pride[]`/`duke[]` | None |
+| Special text overlays | `blaze_it()`, `birthday()` in date row | None |
+| Font table size | `int num[11][80]` — digits 0–9 plus a colon glyph | `int num[10][80]` — digits 0–9 only |
+| Default display | Non-binary flag colours (`enby()`) | Rainbow palette + scrolling diagonal stripes |
+
+### Colour system
+
+**`lenny_clock`** hard-codes three colour arrays at compile time:
+
+- `pride[7]` — the six rainbow colours (red, orange, yellow, green, blue, purple) plus black as a seventh entry  
+- `duke[3]` — Duke Blue, white, grey  
+- `yelp[2]` — purple and black  
+
+Pattern functions (`enby()`, `four_RBYW()`, etc.) pick directly from these arrays. `update_brightness(float)` can scale them all at once, but switching colour schemes requires changing code.
+
+**`ella_clock`** uses a two-layer system:
+
+- `colors[12]` — a full named palette (red, orange, yellow, green, blue, purple, black, white, grey, Duke Blue, cyan, magenta)  
+- `palette[6]` — the *active* background colours, loaded from any of 11 pre-defined palettes by `change_palette()`  
+- `ink_color[4]` — per-digit foreground colours, also set by the active palette  
+
+Calling `change_pal_helper()` cycles through all 11 palettes at runtime without re-flashing the board.
+
+### Rendering model
+
+**`lenny_clock`** uses a **punch-out** approach: each pattern function fills a column with a solid background colour, then calls `s_cover_digits()` to overdraw the digit pixels in a contrasting colour. Background and foreground are painted in the same function call.
+
+**`ella_clock`** uses an **overlay** approach: `face_task` runs the background pattern (fills the whole clock area with the active palette design), then `display_time()` draws only the digit-pixel positions in `ink_color[]` on top. Background and foreground are independent.
+
+### Task scheduling
+
+**`lenny_clock`** runs everything sequentially inside `loop()`:
+
+```
+loop(): update_digits() → enby() → separator → date() → show() → delay(100)
+```
+
+Every step blocks until the previous one finishes. The 100 ms `delay()` sets the update rate.
+
+**`ella_clock`** uses the TaskScheduler library so each concern runs on its own timer:
+
+```
+face_scheduler runs:
+  update_digits_task  every  50 ms  → access_rtc()
+  face_task           every 25-100 ms → active pattern callback
+
+loop(): execute() → display_time() → separator → display_date() → show() → scroll++
+```
+
+The pattern interval is set by `switch_pattern()` and varies by pattern (e.g. 100 ms for animated scrolling, 25 ms for static). There is no `delay()` in `loop()`, so the board stays responsive.
+
+### When to use which sketch
+
+- Use **`lenny_clock`** if you want a simple, easy-to-modify sketch with no extra libraries and a fixed colour scheme. It is the right starting point for customising the look.
+- Use **`ella_clock`** if you want runtime palette/pattern switching, a proper colon separator, or DST-aware time display. The TaskScheduler architecture also makes it easier to add button inputs or other non-blocking behaviour later.
+- Use **`ella_new`** (described in the Sketch descriptions section above) if you want per-pixel control over the foreground colour — for example, digits that show a different hue per pixel, or text that visually blends into the animated rainbow background.
+
+---
+
 ## Customising the display
 
 ### Changing the background pattern (lenny_clock)
