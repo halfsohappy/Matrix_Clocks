@@ -16,6 +16,12 @@ RGB LED matrix clocks driven by an [Adafruit Protomatter](https://github.com/ada
 
 ```
 Matrix_Clocks/
+├── matrix_clock/              ← ★ START HERE — the merged, fully-featured sketch
+│   ├── matrix_clock.ino  – Merged clock: all palettes, patterns, buttons, DST, brightness
+│   ├── face_task_list.h  – Pattern callbacks and palette/ink management
+│   ├── font_array.h      – 8×10 digit glyphs + colon glyph + 3×5 small fonts
+│   └── my_char.h         – Arduino WCharacter.h compatibility header
+│
 ├── lenny_clock/
 │   ├── lenny_clock.ino   – Simple clock with solid colour-block background patterns
 │   ├── font_array.h      – 8×10 digit glyphs (flat int[11][80] arrays) + 3×5 small fonts
@@ -98,6 +104,99 @@ rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 ```
 
 This sets the RTC to the build time of the sketch.  Once the time is set it is stored in the RTC and persists across power cycles.
+
+---
+
+## `matrix_clock` — the merged sketch
+
+`matrix_clock` is the recommended sketch.  It combines every feature from `lenny_clock` and `ella_clock` into one file, with a clearly labelled configuration block at the top.
+
+### Compile-time configuration
+
+Open `matrix_clock/matrix_clock.ino` and edit the `#define` block before uploading:
+
+```cpp
+// Starting palette (1–11).  Cycle at runtime with Button A.
+#define DEFAULT_PALETTE  1
+
+// Starting pattern (0–7).  Cycle at runtime with Button B.
+#define DEFAULT_PATTERN  0
+
+// Draw a colon between the hour and minute digits.  1 = on, 0 = off.
+#define ENABLE_COLON     1
+
+// Detect North-American DST and offset the displayed hour.  1 = on, 0 = off.
+#define ENABLE_DST       0
+
+// Overall brightness, 0.0 (off) to 1.0 (full).
+#define BRIGHTNESS       1.0
+
+// Button pins — wire one leg to the pin and the other to GND.
+#define BTN_PALETTE_PIN  A0
+#define BTN_PATTERN_PIN  A1
+```
+
+### Runtime button control
+
+| Button | Connected to | Action |
+|--------|-------------|--------|
+| Button A | `BTN_PALETTE_PIN` (default `A0`) | Cycles to the next colour palette (1 → 2 → … → 11 → 1) |
+| Button B | `BTN_PATTERN_PIN` (default `A1`) | Cycles to the next background pattern (0 → 1 → … → 7 → 0) |
+
+Both buttons are **active-LOW with internal pull-up** resistors enabled — wire one side to the pin and the other side to `GND`.  No external resistors are needed.  Presses are debounced with a 200 ms window (configurable via `BTN_DEBOUNCE_MS`).
+
+### Palettes (Button A)
+
+| # | Name | Background | Digits |
+|---|------|-----------|--------|
+| 1 | Rainbow | Red/Orange/Yellow/Green/Blue/Purple | Black |
+| 2 | Rainbow | Red/Orange/Yellow/Green/Blue/Purple | White |
+| 3 | RBYW | Red/Blue/Yellow/White | Black |
+| 4 | Pure RGB | Pure Red/Green/Blue/White | Black |
+| 5 | CMY | Cyan/Magenta/Yellow/Black | White |
+| 6 | Pastel | Six soft pink/green/purple tones | Black |
+| 7 | Wilderness | Six earthy brown/green tones | Black |
+| 8 | Duke | Duke Blue/Grey/White/Duke Blue | Black |
+| 9 | Purple/Yellow | Purple and Yellow alternating | Yellow/Purple per digit |
+| 10 | Orange/Cyan | Orange and Blue alternating | Blue/Orange per digit |
+| 11 | Monochrome | Black/White alternating | Grey |
+
+### Patterns (Button B)
+
+| # | Name | Description |
+|---|------|-------------|
+| 0 | Scroll diagonal | Animated rainbow diagonal stripes |
+| 1 | Static diagonal | Non-animated diagonal stripes |
+| 2 | Colour blocks | Solid bands, one per palette colour |
+| 3 | H-thin | Thin horizontal stripes, one row per colour |
+| 4 | H-thick | Thick horizontal bands |
+| 5 | V-thin | Thin vertical stripes |
+| 6 | V-thick | Thick vertical bands |
+| 7 | Random | Random per-pixel palette colour each frame |
+
+### Special date-row overlays
+
+The default date row can be replaced with a special message by swapping the `display_date()` call in `loop()`:
+
+```cpp
+// In loop(), replace:
+display_date(matrix.color565(128, 128, 128));
+
+// With one of:
+blaze_it();   // "BLAZE IT" in red  (e.g. for April 20)
+birthday();   // "BIRTHDAY" erased over the background
+```
+
+### Brightness
+
+```cpp
+// Dim to 50% — edit the define at the top of the sketch:
+#define BRIGHTNESS  0.5
+
+// Or call at runtime after setup() to re-dim dynamically:
+update_brightness(0.5);
+change_palette();  // reload so palette[] uses the new scaled colours
+```
 
 ---
 
