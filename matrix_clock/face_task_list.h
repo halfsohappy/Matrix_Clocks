@@ -237,32 +237,60 @@ void change_palette() {
                matrix.color565(15,15,15), matrix.color565(100,100,100));
       palette_size = 4; WHITE_INK; break;
 
-    case 12: // "Neon Night" — deep violet / hot pink / neon green / electric blue
-      pal_swap(matrix.color565(10,  0,   60),   matrix.color565(255, 0,   120),
-               matrix.color565(0,   200, 80),   matrix.color565(0,   80,  255));
-      palette_size = 4; WHITE_INK; break;
+    case 12: // "Neon Night" — deep violet / hot pink / electric blue / neon green / neon yellow / hot orange
+      pal_swap(matrix.color565(30,  0,   80),   matrix.color565(255, 0,   120),
+               matrix.color565(0,   60,  255),  matrix.color565(0,   230, 60),
+               matrix.color565(220, 255, 0),    matrix.color565(255, 100, 0));
+      palette_size = 6; WHITE_INK; break;
 
-    case 13: // "Ember" — dark red / burnt orange / dark amber / deep purple
-      pal_swap(matrix.color565(120, 10,  0),    matrix.color565(200, 70,  0),
-               matrix.color565(160, 100, 0),    matrix.color565(60,  0,   70));
-      palette_size = 4; WHITE_INK; break;
+    case 13: // "Ember Glow" — near-black / dark red / burnt orange / amber / gold / rose
+      pal_swap(matrix.color565(20,  5,   5),    matrix.color565(150, 10,  0),
+               matrix.color565(220, 70,  0),    matrix.color565(200, 130, 0),
+               matrix.color565(230, 190, 60),   matrix.color565(200, 80,  60));
+      palette_size = 6; WHITE_INK; break;
 
-    case 14: // "Deep Ocean" — navy / ocean blue / deep teal / dark blue
-      pal_swap(matrix.color565(0,   20,  100),  matrix.color565(0,   80,  180),
-               matrix.color565(0,   160, 140),  matrix.color565(0,   40,  80));
-      palette_size = 4; WHITE_INK; break;
+    case 14: // "Deep Ocean" — near-black / navy / ocean blue / cerulean / teal / aquamarine
+      pal_swap(matrix.color565(0,   10,  30),   matrix.color565(0,   20,  100),
+               matrix.color565(0,   80,  180),  matrix.color565(0,   140, 200),
+               matrix.color565(0,   170, 140),  matrix.color565(0,   220, 180));
+      palette_size = 6; WHITE_INK; break;
 
-    case 15: // "Candy" — raspberry / violet / sky blue / mint
-      pal_swap(matrix.color565(220, 0,   100),  matrix.color565(160, 0,   200),
-               matrix.color565(0,   140, 220),  matrix.color565(0,   180, 130));
-      palette_size = 4; WHITE_INK; break;
+    case 15: // "Candy Store" — hot pink / coral / yellow / lime / sky blue / lavender — bright, black digits
+      pal_swap(matrix.color565(255, 80,  160),  matrix.color565(255, 120, 80),
+               matrix.color565(255, 240, 60),   matrix.color565(100, 240, 100),
+               matrix.color565(60,  180, 255),  matrix.color565(180, 120, 255));
+      palette_size = 6; BLACK_INK; break;
+
+    case 16: // "Tropical" — hot coral / tangerine / sunshine / lime / turquoise — black digits
+      pal_swap(matrix.color565(255, 80,  60),   matrix.color565(255, 150, 20),
+               matrix.color565(240, 230, 0),    matrix.color565(60,  220, 80),
+               matrix.color565(0,   200, 200));
+      palette_size = 5; BLACK_INK; break;
+
+    case 17: // "Twilight" — deep indigo / purple / magenta / sunset pink / peach / pale lavender
+      pal_swap(matrix.color565(20,  0,   60),   matrix.color565(90,  0,   140),
+               matrix.color565(180, 0,   160),  matrix.color565(230, 60,  80),
+               matrix.color565(240, 150, 100),  matrix.color565(200, 160, 220));
+      palette_size = 6; WHITE_INK; break;
+
+    case 18: // "Forest" — dark forest / moss / olive / fern / warm brown
+      pal_swap(matrix.color565(0,   40,  10),   matrix.color565(30,  90,  30),
+               matrix.color565(80,  120, 20),   matrix.color565(100, 160, 40),
+               matrix.color565(120, 70,  20));
+      palette_size = 5; WHITE_INK; break;
+
+    case 19: // "Ice" — midnight navy / steel blue / cerulean / slate / periwinkle / icy teal
+      pal_swap(matrix.color565(0,   10,  50),   matrix.color565(20,  60,  120),
+               matrix.color565(50,  110, 180),  matrix.color565(80,  120, 200),
+               matrix.color565(100, 140, 220),  matrix.color565(60,  180, 200));
+      palette_size = 6; WHITE_INK; break;
   }
 }
 
-// Cycle to the next palette (wraps 15 → 1 to stay within valid range 1–15)
+// Cycle to the next palette (wraps 19 → 1 to stay within valid range 1–19)
 void change_pal_helper() {
   current_palette += 1;
-  if (current_palette == 16) { current_palette = 1; }
+  if (current_palette == 20) { current_palette = 1; }
 }
 
 // Cycle to the next pattern (wraps at 12 back to 0)

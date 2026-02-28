@@ -26,7 +26,7 @@
 //  COMPILE-TIME CONFIGURATION — edit these before uploading
 // ============================================================
 
-// Starting palette  (1–15).  Cycle at runtime with Button A.
+// Starting palette  (1–19).  Cycle at runtime with Button A.
 #define DEFAULT_PALETTE  1
 
 // Starting pattern  (0–11).   Cycle at runtime with Button B.
