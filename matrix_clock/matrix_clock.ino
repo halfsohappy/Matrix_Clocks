@@ -66,6 +66,12 @@
 // rendered frame, so buttons and RTC reads remain responsive at all times.
 #define FRAME_MS         50
 
+// How many rendered frames to skip between each one-step advance of the
+// animation scroll counter.  scroll advances every FRAME_MS*SCROLL_DIVIDER ms.
+//   4 → every 200 ms; a 6-colour palette completes one full cycle in ~1.2 s.
+// Increasing this slows the animation; 1 makes it advance every frame (strobe).
+#define SCROLL_DIVIDER   4
+
 // ============================================================
 //  LIBRARIES
 // ============================================================
@@ -185,7 +191,7 @@ void access_rtc();
 void check_buttons();
 
 Scheduler face_scheduler;
-Task update_digits_task(50, -1, &access_rtc);      // RTC read every 50 ms
+Task update_digits_task(1000, -1, &access_rtc);    // RTC read once per second
 Task btn_task(BTN_POLL_MS, -1, &check_buttons);    // button poll every BTN_POLL_MS
 
 // Function pointer to the active background pattern drawing function.
@@ -297,35 +303,42 @@ int trans_y_smol(int pos) { return pos / 3; } // flat index → small glyph row 
 //  RTC TASK CALLBACK
 // ============================================================
 
-// Reads the RTC, populates digits[] (12-hour time) and date_array[],
-// and applies a +1-hour DST offset to the displayed hour when ENABLE_DST=true.
+// Read the RTC once per second and update digits[] and date_array[].
+//
+// Two guard layers protect against corrupted reads:
+//
+//   1. Double-read: two back-to-back rtc.now() calls must agree on hour and
+//      minute.  The DS3231's BCD registers are not read atomically; a counter
+//      increment that occurs mid-read, or I2C timing disturbed by the matrix
+//      DMA interrupt, can produce a snapshot where hour and minute belong to
+//      different seconds.  Sampling twice in quick succession (microseconds
+//      apart, far less than one RTC tick) and discarding if they disagree
+//      virtually guarantees a coherent pair.
+//
+//   2. Range guard: minute > 59 catches the specific BCD rollover value (60)
+//      that the DS3231 briefly shows at the top of each hour.
 void access_rtc() {
-  now = rtc.now();
+  DateTime a = rtc.now();
+  DateTime b = rtc.now();
+  if (a.hour() != b.hour() || a.minute() != b.minute()) return;
 
-  // Guard against DS3231 BCD rollover glitch that can momentarily return
-  // minute=60 at the top of each hour.  Skip the entire update in that case
-  // so digits[] always hold a valid 0-59 minute value.
-  int m = now.minute();
+  now = a;
+  int m  = now.minute();
+  int hr = now.twelveHour();  // 1–12, never 0
+
   if (m > 59) return;
 
-  int hour = now.twelveHour(); // 1–12
-
 #if ENABLE_DST
-  if (check_dst()) {
-    // Advance the displayed hour by one; wrap 12 → 1.
-    hour = (hour % 12) + 1;
-  }
+  if (check_dst()) hr = (hr % 12) + 1;
 #endif
 
-  if (hour < 10) { digits[0] = 0; digits[1] = hour; }
-  else           { digits[0] = 1; digits[1] = hour - 10; }
-
+  digits[0] = (hr < 10) ? 0 : 1;
+  digits[1] = (hr < 10) ? hr : hr - 10;
   digits[2] = m / 10;
   digits[3] = m % 10;
 
-  for (int letter = 0; letter < 3; letter++) {
-    date_array[letter] = months[now.month() - 1][letter];
-  }
+  for (int i = 0; i < 3; i++)
+    date_array[i] = months[now.month() - 1][i];
   date_array[3] = now.day() / 10;
   date_array[4] = now.day() % 10;
 }
@@ -334,73 +347,44 @@ void access_rtc() {
 //  DISPLAY: TIME DIGITS
 // ============================================================
 
-// Draw the four time-digit glyphs onto the matrix.
+// Draw the four time-digit glyphs (foreground / lit pixels only) in ink_color[].
 //
-//  colon — when true AND the leading hour digit is 0, shift the layout
-//           right and draw two colon dots between the hour and minutes.
-//  bg    — when false, draw the lit (foreground) pixels in ink_color[];
-//           when true,  draw the unlit (background) pixels in ink_color[]
-//           (used by background pattern functions to fill around digits).
-void display_time(bool colon, bool bg) {
+// The background behind unlit pixels is whatever the pattern painted.
+// fillScreen(0) at the top of every frame guarantees a clean slate, so unlit
+// pixels that the pattern does not reach default to black — no stale content.
+//
+// Layout when colon=true and the leading hour digit is 0 (hours 1–9):
+//   cols  0– 3 : blank
+//   cols  4–11 : hour digit       (digits[1])
+//   cols 12–15 : colon dots       (ink_color[1])
+//   cols 16–23 : tens-of-minutes  (digits[2])
+//   cols 24–31 : ones-of-minutes  (digits[3])
+//
+// All other cases use the simple 4-digit layout at x-offsets 0, 8, 16, 24.
+void display_time(bool colon) {
   if (!colon || digits[0]) {
-    // Normal four-digit layout (or colon disabled).
+    // Normal 4-digit layout (colon disabled, or two-digit hour 10–12).
     for (int dig = 0; dig < 4; dig++) {
       for (int i = 0; i < 80; i++) {
-        if ((num[digits[dig]][i] && !bg) || (!num[digits[dig]][i] && bg)) {
+        if (num[digits[dig]][i])
           matrix.drawPixel(trans_x(i) + dig * 8, trans_y(i), ink_color[dig]);
-        }
       }
     }
     return;
   }
 
-  // Single-digit hour with colon — shifted layout:
-  //   cols  0-3  : blank / leading space
-  //   cols  4-11 : hour digit
-  //   cols 12-15 : colon dots
-  //   cols 16-23 : tens-of-minutes digit
-  //   cols 24-31 : ones-of-minutes digit
-
-  if (bg) {
-    // Background pixels (the "holes" around each glyph)
-    matrix.fillRect(0, 0, 4, 10, 0);
-    for (int i = 0; i < 80; i++) {
-      if (!num[digits[1]][i]) {
-        matrix.drawPixel(trans_x(i) + 4, trans_y(i), ink_color[1]);
-      }
-    }
-    // Clear colon column backgrounds
-    matrix.fillRect(12, 0, 4, 2, 0);
-    matrix.fillRect(12, 8, 4, 2, 0);
-    matrix.fillRect(12, 0, 1, 10, 0);
-    matrix.fillRect(12, 4, 4, 2, 0);
-    matrix.fillRect(15, 0, 1, 10, 0);
-    for (int i = 0; i < 80; i++) {
-      if (!num[digits[2]][i]) {
-        matrix.drawPixel(trans_x(i) + 16, trans_y(i), ink_color[2]);
-      }
-      if (!num[digits[3]][i]) {
-        matrix.drawPixel(trans_x(i) + 24, trans_y(i), ink_color[3]);
-      }
-    }
-    return;
-  }
-
-  // Foreground pixels (the lit segments and colon dots)
+  // Single-digit hour (1–9) with colon: shift everything right by 4 pixels.
   for (int i = 0; i < 80; i++) {
-    if (num[digits[1]][i]) {
+    if (num[digits[1]][i])
       matrix.drawPixel(trans_x(i) + 4, trans_y(i), ink_color[1]);
-    }
   }
-  matrix.fillRect(13, 2, 2, 2, ink_color[1]); // upper colon dot
-  matrix.fillRect(13, 6, 2, 2, ink_color[1]); // lower colon dot
+  matrix.fillRect(13, 2, 2, 2, ink_color[1]);  // upper colon dot
+  matrix.fillRect(13, 6, 2, 2, ink_color[1]);  // lower colon dot
   for (int i = 0; i < 80; i++) {
-    if (num[digits[2]][i]) {
+    if (num[digits[2]][i])
       matrix.drawPixel(trans_x(i) + 16, trans_y(i), ink_color[2]);
-    }
-    if (num[digits[3]][i]) {
+    if (num[digits[3]][i])
       matrix.drawPixel(trans_x(i) + 24, trans_y(i), ink_color[3]);
-    }
   }
 }
 
@@ -521,41 +505,37 @@ void setup(void) {
 // ============================================================
 
 void loop() {
-  // Always run the scheduler so button presses and RTC reads are serviced
-  // at their own rates (10 ms and 50 ms respectively) regardless of whether
-  // a frame is rendered this iteration.
+  // Run the scheduler every iteration so buttons (10 ms) and RTC (1000 ms)
+  // are serviced at their own cadence, independent of the render rate.
   face_scheduler.execute();
 
-  // Rate-limit rendering to FRAME_MS per frame.  Without this the loop runs
-  // at full CPU speed (~120 MHz on SAMD51), the scroll counter advances
-  // thousands of times per second making every animation a blur, and
-  // matrix.show() saturates the DMA controller.
+  // Enforce the target frame rate.
   static unsigned long last_frame = 0;
   unsigned long now_ms = millis();
   if ((now_ms - last_frame) < FRAME_MS) return;
   last_frame = now_ms;
 
-  // Advance the animation counter exactly once per rendered frame.
-  // Wrap at 600: 600 = LCM(4,6) × 50, so (scroll % 4) and (scroll % 6)
-  // both reset cleanly to 0 at the wrap — no colour jump.
-  scroll = (scroll + 1) % 600;
+  // Advance the animation counter every SCROLL_DIVIDER frames so the
+  // background drifts at a pleasant pace rather than strobing once per frame.
+  static uint8_t scroll_div = 0;
+  if (++scroll_div >= SCROLL_DIVIDER) {
+    scroll_div = 0;
+    scroll = (scroll + 1) % 600;  // 600 = LCM(4,6)×50 — no colour jump at wrap
+  }
 
-  // ── Back-buffer repaint ──────────────────────────────────────────────────
-  // 1. Background pattern fills the entire time area.
-  if (draw_current_pattern) draw_current_pattern();
+  // ── Frame rendering ──────────────────────────────────────────────────────
+  // Protomatter double-buffering SWAPS the two frame buffers on show().
+  // After the swap the new back buffer contains the former front buffer's
+  // pixels — whatever was drawn TWO frames ago, not a clean slate.
+  // Without an explicit clear, any pixel not repainted this frame retains
+  // its stale colour, causing ghost digits and date characters to oscillate
+  // at 10 Hz (half the frame rate), which looks like "jumping."
+  matrix.fillScreen(0);                              // 1. clean slate
 
-  // 2. Time digits drawn in ink_color[] on top of the background.
-  display_time(ENABLE_COLON, false);
+  if (draw_current_pattern) draw_current_pattern();  // 2. background pattern
+  display_time(ENABLE_COLON);                        // 3. time digits
+  matrix.drawFastHLine(0, 10, 32, 0);               // 4. separator row
+  display_date(matrix.color565(128, 128, 128));      // 5. date
 
-  // 3. Thin black separator between time and date rows.
-  matrix.drawFastHLine(0, 10, 32, 0);
-
-  // 4. Clear the date area then redraw.  Patterns like pattern_random cover
-  //    all 16 rows; clearing rows 11-15 here prevents their residual pixels
-  //    from bleeding through the non-lit gaps in the date glyphs.
-  matrix.fillRect(0, 11, 32, 5, 0);
-  display_date(matrix.color565(128, 128, 128));
-
-  // 5. Swap back buffer to display.
-  matrix.show();
+  matrix.show();                                     // 6. swap to display
 }
