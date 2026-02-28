@@ -47,8 +47,10 @@
 
 // Button pin assignments (active-LOW with INPUT_PULLUP).
 // Change these to match wherever you wire your buttons.
-#define BTN_PALETTE_PIN  A0
-#define BTN_PATTERN_PIN  A1
+// NOTE: A0 = D14 = clockPin and A1 = D15 = latchPin on Metro M4, so those
+//       pins cannot be used for buttons.  D2 and D3 are safe choices.
+#define BTN_PALETTE_PIN  2
+#define BTN_PATTERN_PIN  3
 
 // Minimum milliseconds between button presses (debounce).
 #define BTN_DEBOUNCE_MS  200
@@ -118,7 +120,7 @@ Adafruit_Protomatter matrix(
   1, rgbPins,
   3, addrPins,
   clockPin, latchPin, oePin,
-  false  // no double-buffering
+  true  // double-buffering: eliminates flicker and errant-line tearing
 );
 
 // ============================================================

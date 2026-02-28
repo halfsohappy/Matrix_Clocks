@@ -85,7 +85,7 @@ void pattern_v_thick() {
 void pattern_random() {
   for (int x = 0; x < 32; x++) {
     for (int y = 0; y < 16; y++) {
-      matrix.drawPixel(x, y, palette[int(random(1) * palette_size)]);
+      matrix.drawPixel(x, y, palette[random(palette_size)]);
     }
   }
 }
