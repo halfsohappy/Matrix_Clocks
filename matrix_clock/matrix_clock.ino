@@ -26,10 +26,10 @@
 //  COMPILE-TIME CONFIGURATION — edit these before uploading
 // ============================================================
 
-// Starting palette  (1–11).  Cycle at runtime with Button A.
+// Starting palette  (1–15).  Cycle at runtime with Button A.
 #define DEFAULT_PALETTE  1
 
-// Starting pattern  (0–7).   Cycle at runtime with Button B.
+// Starting pattern  (0–11).   Cycle at runtime with Button B.
 #define DEFAULT_PATTERN  0
 
 // Draw a colon between the hour and minute digits.
@@ -394,9 +394,12 @@ void display_time(bool colon) {
 
 // Draw the 3-char month abbreviation and 2-digit day in the bottom rows
 // using 3×5 pixel small glyphs.
+// Each glyph gets a 3×5 black backdrop drawn first so the text is readable
+// against any background pattern colour.
 void display_date(uint16_t color) {
   // Month abbreviation: three letter glyphs starting at x=10, y=11
   for (int place = 0; place < 3; place++) {
+    matrix.fillRect(10 + place * 4, 11, 3, 5, 0);  // black backdrop per glyph
     for (int i = 0; i < 15; i++) {
       if (letters[date_array[place]][i]) {
         matrix.drawPixel(10 + trans_x_smol(i) + place * 4, trans_y_smol(i) + 11, color);
@@ -405,6 +408,7 @@ void display_date(uint16_t color) {
   }
   // Day number: two digit glyphs after the month abbreviation
   for (int place = 3; place < 5; place++) {
+    matrix.fillRect(11 + place * 4, 11, 3, 5, 0);  // black backdrop per glyph
     for (int i = 0; i < 15; i++) {
       if (small_num[date_array[place]][i]) {
         matrix.drawPixel(11 + trans_x_smol(i) + place * 4, trans_y_smol(i) + 11, color);
