@@ -148,6 +148,33 @@ void pattern_sparkle() {
   }
 }
 
+// Concentric rectangular halos counted inward from every edge.
+// ring = min(x, 31-x, y, 15-y) gives 0 for the outermost border up to 7 for
+// the inner-most cells.  Cycling via scroll makes the bands appear to pulse
+// inward like a tunnel.
+void pattern_rings() {
+  for (int x = 0; x < 32; x++) {
+    for (int y = 0; y < 16; y++) {
+      int dx   = min(x, 31 - x);
+      int dy   = min(y, 15 - y);
+      int ring = min(dx, dy);
+      matrix.drawPixel(x, y, palette[(ring + scroll) % palette_size]);
+    }
+  }
+}
+
+// Herringbone zigzag: even rows colour left→right, odd rows colour right→left,
+// then both are offset by row index, creating a chevron/zigzag stripe that
+// animates with scroll for a weaving effect.
+void pattern_zigzag() {
+  for (int y = 0; y < 16; y++) {
+    for (int x = 0; x < 32; x++) {
+      int dx = (y % 2 == 0) ? x : (31 - x);
+      matrix.drawPixel(x, y, palette[(dx / 4 + y / 2 + scroll) % palette_size]);
+    }
+  }
+}
+
 // ---- PATTERN SWITCHER ------------------------------------------------------
 
 // Point draw_current_pattern at the chosen background pattern function.
@@ -167,6 +194,8 @@ void switch_pattern(int pattern) {
     case 9:  draw_current_pattern = &pattern_checker;         break;
     case 10: draw_current_pattern = &pattern_bounce;          break;
     case 11: draw_current_pattern = &pattern_sparkle;         break;
+    case 12: draw_current_pattern = &pattern_rings;           break;
+    case 13: draw_current_pattern = &pattern_zigzag;          break;
   }
 }
 
@@ -293,10 +322,10 @@ void change_pal_helper() {
   if (current_palette == 20) { current_palette = 1; }
 }
 
-// Cycle to the next pattern (wraps at 12 back to 0)
+// Cycle to the next pattern (wraps at 14 back to 0)
 void change_pat_helper() {
   current_pattern += 1;
-  if (current_pattern == 12) { current_pattern = 0; }
+  if (current_pattern == 14) { current_pattern = 0; }
 }
 
 // Stop the background pattern

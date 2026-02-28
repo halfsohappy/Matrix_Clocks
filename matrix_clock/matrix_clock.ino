@@ -7,12 +7,17 @@
 // ── RUNTIME CUSTOMISATION ────────────────────────────────────────────────────
 //   Button A (BTN_PALETTE_PIN, default A0): short press → next palette
 //   Button B (BTN_PATTERN_PIN, default A1): short press → next pattern
+//   Both buttons held for SET_HOLD_MS (default 5 s) → enter time/date set mode:
+//     • Button A increments the highlighted field (hour → minute → month → day)
+//     • Button B advances to the next field; after day, saves and exits
+//     • Hold both buttons again for 5 s to cancel without saving
 //   Both buttons are active-LOW.  Wire one leg to the pin, other leg to GND.
 //   The sketch uses INPUT_PULLUP, so no external resistors are needed.
 //
 // ── FEATURES ─────────────────────────────────────────────────────────────────
-//   • 11 named colour palettes (cycle at runtime with Button A)
-//   • 8 animated/static background patterns (cycle at runtime with Button B)
+//   • 19 named colour palettes (cycle at runtime with Button A)
+//   • 14 animated/static background patterns (cycle at runtime with Button B)
+//   • Time/date set mode: hold both buttons 5 s, A increments, B advances field
 //   • Per-digit ink colours, driven by the active palette
 //   • Optional colon separator with single-digit-hour shift
 //   • Optional North-American DST detection (adjusts the displayed hour only)
@@ -29,7 +34,7 @@
 // Starting palette  (1–19).  Cycle at runtime with Button A.
 #define DEFAULT_PALETTE  1
 
-// Starting pattern  (0–11).   Cycle at runtime with Button B.
+// Starting pattern  (0–13).   Cycle at runtime with Button B.
 #define DEFAULT_PATTERN  0
 
 // Draw a colon between the hour and minute digits.
@@ -55,6 +60,10 @@
 
 // Minimum milliseconds between button presses (debounce).
 #define BTN_DEBOUNCE_MS  200
+
+// How long (in milliseconds) both buttons must be held simultaneously to enter
+// or cancel time/date set mode.  5000 ms = 5 seconds.
+#define SET_HOLD_MS      5000
 
 // How often (in milliseconds) the scheduler polls the button pins.
 // 10 ms gives responsive feel while staying well inside the debounce window.
@@ -211,19 +220,128 @@ PatternFn draw_current_pattern = nullptr;
 unsigned long last_palette_press = 0;
 unsigned long last_pattern_press = 0;
 
-// Poll both buttons; cycle palette or pattern on a debounced falling edge.
+// ============================================================
+//  TIME/DATE SET MODE STATE
+// ============================================================
+
+bool          set_mode        = false; // true while in time/date-set UI
+int           set_field       = 0;    // active field: 0=hour 1=min 2=month 3=day
+int           set_h           = 0;    // working hour   (0–23, 24-hour)
+int           set_m           = 0;    // working minute (0–59)
+int           set_mo          = 1;    // working month  (1–12)
+int           set_d           = 1;    // working day    (1–31)
+int           set_yr          = 2024; // captured year (used on save to avoid midnight year-edge case)
+unsigned long both_held_since = 0;    // millis() when both buttons went LOW together
+
+// ============================================================
+//  SET MODE HELPERS
+// ============================================================
+
+// Return the maximum valid day for a given month and year (leap-year aware).
+static int days_in_month(int month, int year) {
+  static const int dom[13] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
+  if (month == 2) {
+    bool leap = (year % 4 == 0) && (year % 100 != 0 || year % 400 == 0);
+    return leap ? 29 : 28;
+  }
+  return dom[month];
+}
+
+// Snapshot the current RTC values, disable the automatic RTC-read task so
+// the display is frozen for editing, and switch to set mode.
+void enter_set_mode() {
+  DateTime t = rtc.now();
+  set_yr = t.year();    // captured now to avoid a year-edge at midnight
+  set_h  = t.hour();    // 0–23 (24-hour)
+  set_m  = t.minute();
+  set_mo = t.month();
+  set_d  = t.day();
+  set_field = 0;
+  set_mode  = true;
+  // Set debounce timestamps so the first press in set mode is always valid.
+  last_palette_press = millis() - BTN_DEBOUNCE_MS - 1;
+  last_pattern_press = millis() - BTN_DEBOUNCE_MS - 1;
+  update_digits_task.disable();
+}
+
+// Exit set mode.  If save=true, write the edited values to the RTC; always
+// re-enable the RTC-read task and refresh digits[] from the (possibly updated) time.
+void exit_set_mode(bool save) {
+  if (save) {
+    rtc.adjust(DateTime(set_yr, set_mo, set_d, set_h, set_m, 0));
+  }
+  set_mode = false;
+  last_palette_press = millis() - BTN_DEBOUNCE_MS - 1;
+  last_pattern_press = millis() - BTN_DEBOUNCE_MS - 1;
+  update_digits_task.enable();
+  access_rtc();  // refresh digits[] / date_array[] immediately
+}
+
+// Increment the active field value with wrap-around.  When the month changes,
+// the day is clamped to the new month's maximum so an invalid date is never
+// stored (e.g. January 31 → switching to February clamps the day to 28/29).
+void increment_set_field() {
+  switch (set_field) {
+    case 0: set_h  = (set_h  +  1) % 24; break;
+    case 1: set_m  = (set_m  +  1) % 60; break;
+    case 2:
+      set_mo = (set_mo % 12) + 1;   // 1→2→…→12→1
+      // Clamp day to the new month's actual maximum (leap-year aware).
+      { int max_d = days_in_month(set_mo, set_yr);
+        if (set_d > max_d) set_d = max_d; }
+      break;
+    case 3: set_d = (set_d % days_in_month(set_mo, set_yr)) + 1; break;
+  }
+}
+
+// Advance to the next field.  After the last field (day), save and exit.
+void advance_set_field() {
+  if (++set_field > 3) exit_set_mode(true);
+}
+
+// ============================================================
+//  BUTTON HANDLING
+// ============================================================
+
+// Poll both buttons; cycle palette/pattern normally, or drive set mode when active.
 void check_buttons() {
   unsigned long now_ms = millis();
+  bool a_low = digitalRead(BTN_PALETTE_PIN) == LOW;
+  bool b_low = digitalRead(BTN_PATTERN_PIN) == LOW;
 
-  if (digitalRead(BTN_PALETTE_PIN) == LOW &&
-      (now_ms - last_palette_press) > BTN_DEBOUNCE_MS) {
+  // ── Both-button hold: enter set mode (normal) or cancel set mode ─────────
+  if (a_low && b_low) {
+    if (both_held_since == 0) both_held_since = now_ms;
+    if ((now_ms - both_held_since) >= SET_HOLD_MS) {
+      both_held_since = 0;
+      if (!set_mode) enter_set_mode();
+      else           exit_set_mode(false);  // cancel without saving
+    }
+    return;  // don't process individual presses while both are held
+  }
+  both_held_since = 0;
+
+  // ── Set mode: A increments active field, B advances to next field ─────────
+  if (set_mode) {
+    if (a_low && (now_ms - last_palette_press) > BTN_DEBOUNCE_MS) {
+      last_palette_press = now_ms;
+      increment_set_field();
+    }
+    if (b_low && (now_ms - last_pattern_press) > BTN_DEBOUNCE_MS) {
+      last_pattern_press = now_ms;
+      advance_set_field();  // saves and exits after the day field
+    }
+    return;
+  }
+
+  // ── Normal mode ──────────────────────────────────────────────────────────
+  if (a_low && (now_ms - last_palette_press) > BTN_DEBOUNCE_MS) {
     last_palette_press = now_ms;
     change_pal_helper();   // advance current_palette
     change_palette();      // load the new palette into palette[] and ink_color[]
   }
 
-  if (digitalRead(BTN_PATTERN_PIN) == LOW &&
-      (now_ms - last_pattern_press) > BTN_DEBOUNCE_MS) {
+  if (b_low && (now_ms - last_pattern_press) > BTN_DEBOUNCE_MS) {
     last_pattern_press = now_ms;
     change_pat_helper();              // advance current_pattern
     switch_pattern(current_pattern);  // update draw_current_pattern function pointer
@@ -418,6 +536,75 @@ void display_date(uint16_t color) {
 }
 
 // ============================================================
+//  DISPLAY: SET MODE OVERLAY
+// ============================================================
+
+// Draw the time/date-set UI.  Called from loop() instead of the normal
+// display_time() / display_date() pair while set_mode is true.
+//
+// The active field blinks (500 ms on / 300 ms off).  All other fields are
+// shown steady in the current ink colour.  The active field is drawn bright
+// white so it stands out clearly against any background pattern.
+//
+// Time is shown in 24-hour format (0–23) as four digits in the top rows,
+// matching the big-glyph layout used by display_time().
+// Date is shown as a 3-letter month abbreviation + 2-digit day at the bottom,
+// identical to display_date().
+//
+// Two white pixels at x=0–1, y=10 (the separator row) act as a small always-on
+// indicator that set mode is active.
+void display_set_time() {
+  bool blink_on = (millis() % 800) < 500;
+  uint16_t ink  = ink_color[0];
+
+  // ── Time (24-hour, always 4-digit) in rows 0–9 ───────────────────────────
+  int d[4] = { set_h / 10, set_h % 10, set_m / 10, set_m % 10 };
+  for (int dig = 0; dig < 4; dig++) {
+    bool active = (set_field == 0 && dig < 2) || (set_field == 1 && dig >= 2);
+    if (active && !blink_on) continue;          // hide on the "off" half-cycle
+    uint16_t c = active ? WHITE : ink;          // bright white when this field is active
+    for (int i = 0; i < 80; i++) {
+      if (num[d[dig]][i])
+        matrix.drawPixel(trans_x(i) + dig * 8, trans_y(i), c);
+    }
+  }
+
+  // ── Separator ────────────────────────────────────────────────────────────
+  matrix.drawFastHLine(0, 10, 32, 0);
+
+  // ── Set-mode indicator: two bright pixels at left of separator row ────────
+  matrix.drawPixel(0, 10, WHITE);
+  matrix.drawPixel(1, 10, WHITE);
+
+  // ── Date: month abbreviation (3 letters) in rows 11–15 ───────────────────
+  for (int place = 0; place < 3; place++) {
+    bool active = (set_field == 2);
+    matrix.fillRect(10 + place * 4, 11, 3, 5, 0);
+    if (!(active && !blink_on)) {
+      uint16_t c = active ? WHITE : ink;
+      for (int i = 0; i < 15; i++) {
+        if (letters[months[set_mo - 1][place]][i])
+          matrix.drawPixel(10 + trans_x_smol(i) + place * 4, trans_y_smol(i) + 11, c);
+      }
+    }
+  }
+
+  // ── Date: day-of-month (2 digits) in rows 11–15 ──────────────────────────
+  int day_d[2] = { set_d / 10, set_d % 10 };
+  for (int place = 0; place < 2; place++) {
+    bool active = (set_field == 3);
+    matrix.fillRect(11 + (place + 3) * 4, 11, 3, 5, 0);
+    if (!(active && !blink_on)) {
+      uint16_t c = active ? WHITE : ink;
+      for (int i = 0; i < 15; i++) {
+        if (small_num[day_d[place]][i])
+          matrix.drawPixel(11 + trans_x_smol(i) + (place + 3) * 4, trans_y_smol(i) + 11, c);
+      }
+    }
+  }
+}
+
+// ============================================================
 //  SPECIAL TEXT OVERLAYS  (from lenny_clock)
 // ============================================================
 
@@ -537,9 +724,14 @@ void loop() {
   matrix.fillScreen(0);                              // 1. clean slate
 
   if (draw_current_pattern) draw_current_pattern();  // 2. background pattern
-  display_time(ENABLE_COLON);                        // 3. time digits
-  matrix.drawFastHLine(0, 10, 32, 0);               // 4. separator row
-  display_date(WHITE);                               // 5. date (white on black for maximum readability)
+
+  if (set_mode) {
+    display_set_time();                              // 3a. set-mode overlay
+  } else {
+    display_time(ENABLE_COLON);                      // 3b. time digits
+    matrix.drawFastHLine(0, 10, 32, 0);             // 4. separator row
+    display_date(WHITE);                             // 5. date
+  }
 
   matrix.show();                                     // 6. swap to display
 }
