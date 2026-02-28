@@ -11,77 +11,90 @@
 // Each function fills the matrix with a colour pattern and is registered as
 // the callback for face_task by switch_pattern().
 
-// Animated scrolling diagonal stripes that advance each frame
+// Animated scrolling anti-diagonal stripes covering the full 32×16 display.
+// d = x+y ranges 0..46 (0+0 to 31+15).  Endpoints are clipped to the display
+// rectangle.  Every two diagonals share a colour (2-pixel-wide bands).
+// Scroll offsets the colour index; wrap at 600 keeps no colour jump.
 void pattern_scroll_diagonal() {
-  if (palette_size == 6) {
-    for (int i = 0; i < 48; i++) {
-      matrix.drawLine(0, i, i, 0, palette[(abs(i - scroll) % palette_size)]);
-    }
-  } else {
-    for (int i = 0; i < 24; i++) {
-      matrix.drawLine(0, 2*i,   2*i,   0, palette[(abs(i - scroll) % palette_size)]);
-      matrix.drawLine(0, 2*i+1, 2*i+1, 0, palette[(abs(i - scroll) % palette_size)]);
-    }
+  for (int d = 0; d <= 46; d++) {
+    uint16_t color = palette[((d / 2) + scroll) % palette_size];
+    int x0 = (d <= 15) ? 0    : d - 15;
+    int y0 = (d <= 15) ? d    : 15;
+    int x1 = (d <= 31) ? d    : 31;
+    int y1 = (d <= 31) ? 0    : d - 31;
+    matrix.drawLine(x0, y0, x1, y1, color);
   }
 }
 
-// Static diagonal stripes (no animation)
+// Static anti-diagonal stripes — same layout as above but no animation.
 void pattern_diagonal() {
-  for (int i = 0; i < 48; i++) {
-    matrix.drawLine(0, i, i, 0, palette[i % palette_size]);
-  }
-  for (int i = 0; i < 24; i++) {
-    matrix.drawLine(0, 2*i,   2*i,   0, palette[i % palette_size]);
-    matrix.drawLine(0, 2*i+1, 2*i+1, 0, palette[i % palette_size]);
+  for (int d = 0; d <= 46; d++) {
+    uint16_t color = palette[(d / 2) % palette_size];
+    int x0 = (d <= 15) ? 0    : d - 15;
+    int y0 = (d <= 15) ? d    : 15;
+    int x1 = (d <= 31) ? d    : 31;
+    int y1 = (d <= 31) ? 0    : d - 31;
+    matrix.drawLine(x0, y0, x1, y1, color);
   }
 }
 
-// Solid colour blocks, one per digit column — best without colon shift
+// Solid colour blocks spanning the full 32×16 display.
 void pattern_blocks() {
   if (palette_size == 6) {
-    matrix.fillRect(0,  0, 6, 11, palette[0]);
-    matrix.fillRect(6,  0, 5, 11, palette[1]);
-    matrix.fillRect(11, 0, 5, 11, palette[2]);
-    matrix.fillRect(16, 0, 5, 11, palette[3]);
-    matrix.fillRect(21, 0, 5, 11, palette[4]);
-    matrix.fillRect(26, 0, 6, 11, palette[5]);
+    matrix.fillRect(0,  0, 6, 16, palette[0]);
+    matrix.fillRect(6,  0, 5, 16, palette[1]);
+    matrix.fillRect(11, 0, 5, 16, palette[2]);
+    matrix.fillRect(16, 0, 5, 16, palette[3]);
+    matrix.fillRect(21, 0, 5, 16, palette[4]);
+    matrix.fillRect(26, 0, 6, 16, palette[5]);
   }
   if (palette_size == 4) {
     for (int i = 0; i < 4; i++) {
-      matrix.fillRect(i * 8, 0, 8, 11, palette[i]);
+      matrix.fillRect(i * 8, 0, 8, 16, palette[i]);
     }
   }
 }
 
-// Thin horizontal stripes, one stripe per palette colour per row
+// Thin horizontal stripes cycling through palette colours, full 16 rows.
 void pattern_h_thin() {
-  for (int i = 0; i < 12; i++) {
+  for (int i = 0; i < 16; i++) {
     matrix.drawFastHLine(0, i, 32, palette[i % palette_size]);
   }
 }
 
-// Thick horizontal bands, evenly dividing the clock area between palette colours
+// Thick horizontal bands filling all 16 rows, evenly distributed.
 void pattern_h_thick() {
+  int band_h = 16 / palette_size;
+  if (band_h < 1) band_h = 1;
   for (int i = 0; i < palette_size; i++) {
-    matrix.fillRect(0, i * (12 / palette_size), 32, 12 / palette_size, palette[i]);
+    matrix.fillRect(0, i * band_h, 32, band_h, palette[i]);
+  }
+  int covered = band_h * palette_size;
+  if (covered < 16) {
+    matrix.fillRect(0, covered, 32, 16 - covered, palette[palette_size - 1]);
   }
 }
 
-// Thin vertical stripes, one stripe per palette colour per column
+// Thin vertical stripes, one colour per column, full 16-row height.
 void pattern_v_thin() {
   for (int i = 0; i < 32; i++) {
-    matrix.drawFastVLine(i, 0, 11, palette[i % palette_size]);
+    matrix.drawFastVLine(i, 0, 16, palette[i % palette_size]);
   }
 }
 
-// Thick vertical bands (uses same formula as h_thick but orientation differs)
+// Thick vertical bands across the full 32×16 display.
 void pattern_v_thick() {
+  int band_w = 32 / palette_size;
   for (int i = 0; i < palette_size; i++) {
-    matrix.fillRect(i * (12 / palette_size), 0, 12 / palette_size, 11, palette[i]);
+    matrix.fillRect(i * band_w, 0, band_w, 16, palette[i]);
+  }
+  int covered = band_w * palette_size;
+  if (covered < 32) {
+    matrix.fillRect(covered, 0, 32 - covered, 16, palette[palette_size - 1]);
   }
 }
 
-// Random per-pixel colour from the active palette
+// Random per-pixel colour from the active palette, full 16 rows.
 void pattern_random() {
   for (int x = 0; x < 32; x++) {
     for (int y = 0; y < 16; y++) {
@@ -90,19 +103,99 @@ void pattern_random() {
   }
 }
 
+// Animated horizontal bands that slide upward each scroll step.
+// Each row gets the palette colour for (row + scroll) % palette_size,
+// so the colour assigned to each row changes over time.
+void pattern_scroll_h() {
+  for (int y = 0; y < 16; y++) {
+    matrix.drawFastHLine(0, y, 32, palette[(y + scroll) % palette_size]);
+  }
+}
+
+// Animated 2×2 checkerboard that shifts colour every few scroll steps.
+// Each 2×2 cell is assigned palette[(cell_x + cell_y + scroll/2) % palette_size].
+void pattern_checker() {
+  for (int x = 0; x < 32; x++) {
+    for (int y = 0; y < 16; y++) {
+      int cell = (x / 2) + (y / 2);
+      matrix.drawPixel(x, y, palette[(cell + scroll / 2) % palette_size]);
+    }
+  }
+}
+
+// Animated bright bar that ping-pongs left-to-right across a solid base.
+// The bar is 4 px wide; palette[0] fills the base, palette[1] paints the bar.
+void pattern_bounce() {
+  matrix.fillRect(0, 0, 32, 16, palette[0]);
+  int period = 56;                             // total steps for one full round trip
+  int raw    = scroll % period;
+  int pos    = (raw < 28) ? raw : 55 - raw;   // ping-pong: 0 → 27 → 0
+  uint16_t bar_color = palette[1 % palette_size];
+  for (int w = 0; w < 4 && (pos + w) < 32; w++) {
+    matrix.drawFastVLine(pos + w, 0, 16, bar_color);
+  }
+}
+
+// Dark base filled with palette[0], then ~15 random sparkle pixels per frame
+// drawn in any other palette colour.  Twinkle rate follows the scroll divider.
+void pattern_sparkle() {
+  matrix.fillRect(0, 0, 32, 16, palette[0]);
+  if (palette_size > 1) {
+    for (int i = 0; i < 15; i++) {
+      matrix.drawPixel(random(32), random(16),
+                       palette[1 + random(palette_size - 1)]);
+    }
+  }
+}
+
+// Concentric rectangular halos counted inward from every edge.
+// ring = min(x, 31-x, y, 15-y) gives 0 for the outermost border up to 7 for
+// the inner-most cells.  Cycling via scroll makes the bands appear to pulse
+// inward like a tunnel.
+void pattern_rings() {
+  for (int x = 0; x < 32; x++) {
+    for (int y = 0; y < 16; y++) {
+      int dx   = min(x, 31 - x);
+      int dy   = min(y, 15 - y);
+      int ring = min(dx, dy);
+      matrix.drawPixel(x, y, palette[(ring + scroll) % palette_size]);
+    }
+  }
+}
+
+// Herringbone zigzag: even rows colour left→right, odd rows colour right→left,
+// then both are offset by row index, creating a chevron/zigzag stripe that
+// animates with scroll for a weaving effect.
+void pattern_zigzag() {
+  for (int y = 0; y < 16; y++) {
+    for (int x = 0; x < 32; x++) {
+      int dx = (y % 2 == 0) ? x : (31 - x);
+      matrix.drawPixel(x, y, palette[(dx / 4 + y / 2 + scroll) % palette_size]);
+    }
+  }
+}
+
 // ---- PATTERN SWITCHER ------------------------------------------------------
 
-// Set face_task to run the chosen background pattern
+// Point draw_current_pattern at the chosen background pattern function.
+// The main loop calls draw_current_pattern() every frame, so the back buffer
+// is always fully repainted before digits are overlaid.
 void switch_pattern(int pattern) {
   switch (pattern) {
-    case 0: face_task.setCallback(&pattern_scroll_diagonal); face_task.setInterval(100); break;
-    case 1: face_task.setCallback(&pattern_diagonal);        face_task.setInterval(25);  break;
-    case 2: face_task.setCallback(&pattern_blocks);          face_task.setInterval(25);  break;
-    case 3: face_task.setCallback(&pattern_h_thin);          face_task.setInterval(100); break;
-    case 4: face_task.setCallback(&pattern_h_thick);         face_task.setInterval(25);  break;
-    case 5: face_task.setCallback(&pattern_v_thin);  face_task.setInterval(100); break;
-    case 6: face_task.setCallback(&pattern_v_thick); face_task.setInterval(25);  break;
-    case 7: face_task.setCallback(&pattern_random);          face_task.setInterval(100); break;
+    case 0:  draw_current_pattern = &pattern_scroll_diagonal; break;
+    case 1:  draw_current_pattern = &pattern_diagonal;        break;
+    case 2:  draw_current_pattern = &pattern_blocks;          break;
+    case 3:  draw_current_pattern = &pattern_h_thin;          break;
+    case 4:  draw_current_pattern = &pattern_h_thick;         break;
+    case 5:  draw_current_pattern = &pattern_v_thin;          break;
+    case 6:  draw_current_pattern = &pattern_v_thick;         break;
+    case 7:  draw_current_pattern = &pattern_random;          break;
+    case 8:  draw_current_pattern = &pattern_scroll_h;        break;
+    case 9:  draw_current_pattern = &pattern_checker;         break;
+    case 10: draw_current_pattern = &pattern_bounce;          break;
+    case 11: draw_current_pattern = &pattern_sparkle;         break;
+    case 12: draw_current_pattern = &pattern_rings;           break;
+    case 13: draw_current_pattern = &pattern_zigzag;          break;
   }
 }
 
@@ -160,36 +253,82 @@ void change_palette() {
       pal_swap(DUKE_BLUE, GRAY, WHITE, DUKE_BLUE);
       palette_size = 4; BLACK_INK; break;
 
-    case 9:  // Purple/Yellow contrast
+    case 9:  // Purple/Yellow contrast — white digits (visible on both colours)
       pal_swap(PURPLE, YELLOW, PURPLE, YELLOW);
-      palette_size = 4;
-      ink_swap(YELLOW, PURPLE, YELLOW, PURPLE); break;
+      palette_size = 4; WHITE_INK; break;
 
-    case 10: // Orange/Cyan contrast
+    case 10: // Orange/Blue contrast — white digits (visible on all four colours)
       pal_swap(ORANGE, BLACK, BLUE, BLACK);
-      palette_size = 4;
-      ink_swap(BLUE, ORANGE, ORANGE, BLUE); break;
+      palette_size = 4; WHITE_INK; break;
 
-    case 11: // Monochrome (black/white) — grey digits
-      pal_swap(BLACK, WHITE, BLACK, WHITE);
-      palette_size = 4;
-      ink_swap(GRAY, GRAY, GRAY, GRAY); break;
+    case 11: // Monochrome — white digits on dark/mid-grey
+      pal_swap(matrix.color565(15,15,15), matrix.color565(100,100,100),
+               matrix.color565(15,15,15), matrix.color565(100,100,100));
+      palette_size = 4; WHITE_INK; break;
+
+    case 12: // "Neon Night" — deep violet / hot pink / electric blue / neon green / neon yellow / hot orange
+      pal_swap(matrix.color565(30,  0,   80),   matrix.color565(255, 0,   120),
+               matrix.color565(0,   60,  255),  matrix.color565(0,   230, 60),
+               matrix.color565(220, 255, 0),    matrix.color565(255, 100, 0));
+      palette_size = 6; WHITE_INK; break;
+
+    case 13: // "Ember Glow" — near-black / dark red / burnt orange / amber / gold / rose
+      pal_swap(matrix.color565(20,  5,   5),    matrix.color565(150, 10,  0),
+               matrix.color565(220, 70,  0),    matrix.color565(200, 130, 0),
+               matrix.color565(230, 190, 60),   matrix.color565(200, 80,  60));
+      palette_size = 6; WHITE_INK; break;
+
+    case 14: // "Deep Ocean" — near-black / navy / ocean blue / cerulean / teal / aquamarine
+      pal_swap(matrix.color565(0,   10,  30),   matrix.color565(0,   20,  100),
+               matrix.color565(0,   80,  180),  matrix.color565(0,   140, 200),
+               matrix.color565(0,   170, 140),  matrix.color565(0,   220, 180));
+      palette_size = 6; WHITE_INK; break;
+
+    case 15: // "Candy Store" — hot pink / coral / yellow / lime / sky blue / lavender — bright, black digits
+      pal_swap(matrix.color565(255, 80,  160),  matrix.color565(255, 120, 80),
+               matrix.color565(255, 240, 60),   matrix.color565(100, 240, 100),
+               matrix.color565(60,  180, 255),  matrix.color565(180, 120, 255));
+      palette_size = 6; BLACK_INK; break;
+
+    case 16: // "Tropical" — hot coral / tangerine / sunshine / lime / turquoise — black digits
+      pal_swap(matrix.color565(255, 80,  60),   matrix.color565(255, 150, 20),
+               matrix.color565(240, 230, 0),    matrix.color565(60,  220, 80),
+               matrix.color565(0,   200, 200));
+      palette_size = 5; BLACK_INK; break;
+
+    case 17: // "Twilight" — deep indigo / purple / magenta / sunset pink / peach / pale lavender
+      pal_swap(matrix.color565(20,  0,   60),   matrix.color565(90,  0,   140),
+               matrix.color565(180, 0,   160),  matrix.color565(230, 60,  80),
+               matrix.color565(240, 150, 100),  matrix.color565(200, 160, 220));
+      palette_size = 6; WHITE_INK; break;
+
+    case 18: // "Forest" — dark forest / moss / olive / fern / warm brown
+      pal_swap(matrix.color565(0,   40,  10),   matrix.color565(30,  90,  30),
+               matrix.color565(80,  120, 20),   matrix.color565(100, 160, 40),
+               matrix.color565(120, 70,  20));
+      palette_size = 5; WHITE_INK; break;
+
+    case 19: // "Ice" — midnight navy / steel blue / cerulean / slate / periwinkle / icy teal
+      pal_swap(matrix.color565(0,   10,  50),   matrix.color565(20,  60,  120),
+               matrix.color565(50,  110, 180),  matrix.color565(80,  120, 200),
+               matrix.color565(100, 140, 220),  matrix.color565(60,  180, 200));
+      palette_size = 6; WHITE_INK; break;
   }
 }
 
-// Cycle to the next palette (wraps 11 → 1 to stay within valid range 1–11)
+// Cycle to the next palette (wraps 19 → 1 to stay within valid range 1–19)
 void change_pal_helper() {
   current_palette += 1;
-  if (current_palette == 12) { current_palette = 1; }
+  if (current_palette == 20) { current_palette = 1; }
 }
 
-// Cycle to the next pattern (wraps at 8 back to 0)
+// Cycle to the next pattern (wraps at 14 back to 0)
 void change_pat_helper() {
   current_pattern += 1;
-  if (current_pattern == 8) { current_pattern = 0; }
+  if (current_pattern == 14) { current_pattern = 0; }
 }
 
-// Stop the background pattern task
+// Stop the background pattern
 void disablePattern() {
-  face_task.disable();
+  draw_current_pattern = nullptr;
 }
