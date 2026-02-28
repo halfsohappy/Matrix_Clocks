@@ -1,0 +1,10 @@
+# macOS metadata files
+.DS_Store
+**/.DS_Store
+
+# Arduino build artefacts
+build/
+*.elf
+*.hex
+*.bin
+_codeql_detected_source_root

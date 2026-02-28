@@ -1,4 +1,18 @@
-//import libraries
+// ella_clock.ino
+// An RGB LED matrix clock with animated background patterns, a palette/pattern
+// system, DST detection, and a TaskScheduler for non-blocking operation.
+//
+// Hardware:
+//   - 32×16 RGB LED matrix driven by Adafruit Protomatter
+//   - DS3231 real-time clock module
+//   - Metro/Feather M4 (or RP2040 Feather) microcontroller
+//
+// Display layout:
+//   Rows  0-9  : four 8×10 digit glyphs showing HH:MM in 12-hour format
+//   Row   10   : black separator line
+//   Rows 11-15 : 3-char month abbreviation + 2-digit day in small 3×5 glyphs
+
+// Libraries
 #include <Adafruit_Protomatter.h>
 #include <Adafruit_GFX.h>
 #include "RTClib.h"
@@ -6,7 +20,8 @@
 #include <TaskScheduler.h>
 #include <TaskSchedulerDeclarations.h>
 #include <TaskSchedulerSleepMethods.h>
-//color definitions
+
+// Colour aliases that index into the colors[] array defined below
 #define RED colors[0]
 #define ORANGE colors[1]
 #define YELLOW colors[2]
@@ -19,273 +34,241 @@
 #define DUKE_BLUE colors[9]
 #define CYAN colors[10]
 #define MAGENTA colors[11]
-#define PURE_RED matrix.color565(255,0,0)
+#define PURE_RED   matrix.color565(255,0,0)
 #define PURE_GREEN matrix.color565(0,255,0)
-#define PURE_BLUE matrix.color565(0,0,255)
+#define PURE_BLUE  matrix.color565(0,0,255)
 
+// MATRIX PINS (Metro/Feather M4 or compatible):
+uint8_t rgbPins[]  = {7, 8, 9, 10, 11, 12};
+uint8_t addrPins[] = {17, 18, 19, 20, 21};
+uint8_t clockPin   = 14;
+uint8_t latchPin   = 15;
+uint8_t oePin      = 16;
+int rot = 2; // display rotation (0/1/2/3)
 
+// RP2040 Feather pins (uncomment and comment the block above if using that board):
+// uint8_t rgbPins[]  = {8, 7, 9, 11, 10, 12};
+// uint8_t addrPins[] = {25, 24, 29, 28};
+// uint8_t clockPin   = 13;
+// uint8_t latchPin   = 1;
+// uint8_t oePin      = 0;
+// int rot = 0;
 
-
-//find second sunday in march, if after, go forward
-//find first sunday of november, if after, don't
-bool ink;
-
-
-  //MATRIX PINS:
-  uint8_t rgbPins[]  = {7, 8, 9, 10, 11, 12};
-  uint8_t addrPins[] = {17, 18, 19, 20, 21};
-  uint8_t clockPin   = 14;
-  uint8_t latchPin   = 15;
-  uint8_t oePin      = 16;
-  int rot = 2;
-
-  // //RP2040FEATHER PINS:
-  // uint8_t rgbPins[]  = {8, 7, 9, 11, 10, 12};
-  // uint8_t addrPins[] = {25, 24, 29, 28};
-  // uint8_t clockPin   = 13;
-  // uint8_t latchPin   = 1;
-  // uint8_t oePin      = 0;
-  // int rot = 0;
-
-//RTC DECLARATIONS AND FUNCTIONS
+// Real-time clock and current timestamp
 RTC_DS3231 rtc;
 DateTime now;
 
-//array holding digits related to time
-int digits[] = {1,0,2,3};
-//array holding 3 ints related to chars of month name and 2 ints of date number
-int date_array[] = {0,0,0,0,0};
+// digits[0..3] = [H1, H2, M1, M2] for the four display glyphs
+int digits[] = {1, 0, 2, 3};
+// date_array[0..2] = letter indices for 3-char month abbreviation
+// date_array[3]    = tens digit of day-of-month
+// date_array[4]    = ones digit of day-of-month
+int date_array[] = {0, 0, 0, 0, 0};
 
-//function used to collect current time and date
-void access_rtc(){
-  now = rtc.now();
-  //updating time
-  if(now.twelveHour() < 10){digits[0] = 0; digits[1] = now.twelveHour();}
-  else{digits[0] = 1; digits[1] = now.twelveHour()-10;}
-  digits[2] = (now.minute() / 10);
-  digits[3] = now.minute() % 10;
-  //updating date
-  for(int letter = 0; letter <3; letter++){date_array[letter] = months[now.month()-1][letter];}
-  date_array[3] = (now.day() / 10);
-  date_array[4] = now.day() % 10;
-}
-
-DateTime calc_dst_start(){
-  now = rtc.now();
-  DateTime this_day;
-  int day_of_month = 1;
-  for(int num_sunday = 0; num_sunday < 2;){
-    this_day = DateTime(now.year(), 3, day_of_month);
-    if(!this_day.dayOfTheWeek()){ //if it's sunday
-      num_sunday++;
-    }
-    else{
-      day_of_month++;
-    }
-  }
-  return this_day;
-}
-
-DateTime calc_dst_end(){
-  now = rtc.now();
-  int day_of_month = 1;
-  DateTime this_day;
-  for(int num_sunday = 0; num_sunday < 1;){
-    this_day = DateTime(now.year(), 11, day_of_month);
-    if(!this_day.dayOfTheWeek()){ //if it's sunday
-      num_sunday++;
-    }
-    else{
-      day_of_month++;
-    }
-  }
-  return this_day;
-}
-
-bool check_dst(){
-return (calc_dst_start() <= rtc.now()) && (rtc.now() <= calc_dst_end());
-}
-
-
-//MATRIX CONSTRUCTOR
+// Adafruit Protomatter matrix: 32 px wide, 4-bit colour depth, single chain,
+// 3 address pins (height inferred as 16), no double-buffering
 Adafruit_Protomatter matrix(
-  32,          // Width of matrix (or matrix chain) in pixels
-  4,           // Bit depth, 1-6
-  1, rgbPins,  // # of matrix chains, array of 6 RGB pins for each
-  3, addrPins, // # of address pins (height is inferred), array of pins
-  clockPin, latchPin, oePin, // Other matrix control pins
-  false      // No double-buffering here (see "doublebuffer" example)
+  32,           // Width of matrix in pixels
+  4,            // Bit depth, 1-6
+  1, rgbPins,   // # of matrix chains, RGB pins
+  3, addrPins,  // # of address pins, address pin array
+  clockPin, latchPin, oePin,
+  false         // No double-buffering
 );
 
-//CREATE COLOR ARRAYS FOR CONVENIENCE
+// Named colour palette
 uint16_t colors[] = {
-  matrix.color565(255,0,0),//Red
-  matrix.color565(253, 152, 0),//Orange
-  matrix.color565(255, 255, 0),//Yellow
-  matrix.color565(51, 254, 0),//Green
-  matrix.color565(0, 151, 253),//Blue
-  matrix.color565(102, 51, 253),//Purple
-  0,//Black
-  65535,//White
-  matrix.color565(72, 72, 72),//lightish gray
-  matrix.color565(28, 33, 168),//duke blue
-  matrix.color565(0,255,255),//Cyan
-  matrix.color565(255,0,255),//Magenta
+  matrix.color565(255, 0, 0),       // 0 Red
+  matrix.color565(253, 152, 0),     // 1 Orange
+  matrix.color565(255, 255, 0),     // 2 Yellow
+  matrix.color565(51, 254, 0),      // 3 Green
+  matrix.color565(0, 151, 253),     // 4 Blue
+  matrix.color565(102, 51, 253),    // 5 Purple
+  0,                                // 6 Black
+  65535,                            // 7 White
+  matrix.color565(72, 72, 72),      // 8 Gray
+  matrix.color565(28, 33, 168),     // 9 Duke Blue
+  matrix.color565(0, 255, 255),     // 10 Cyan
+  matrix.color565(255, 0, 255),     // 11 Magenta
 };
 
-
-
+// Active background palette (up to 6 colours) and per-digit ink colours
 uint16_t palette[6];
 uint16_t ink_color[4] = {WHITE, WHITE, WHITE, WHITE};
 int palette_size = 6;
-int current_palette = 0;
-int current_pattern = 0;
+int current_palette = 0; // which named palette is active (0 = default)
+int current_pattern = 0; // which background pattern is active
 
-//SCHEDULER DECLARATIONS
+// Scroll counter used to animate moving patterns
+int scroll = 0;
+
+// Forward declaration required because update_digits_task references access_rtc
+// before the function definition appears below
+void access_rtc();
+
+// SCHEDULER SETUP
+// face_task  : fires every 100 ms to redraw the animated background pattern
+// update_digits_task : fires every 50 ms to refresh digits[] from the RTC
 Scheduler face_scheduler;
 Task face_task(100, -1);
 Task update_digits_task(50, -1, &access_rtc);
-//Task check_minute_task(5000, -1, &check_minute);
 
-int scroll = 0;
-
+// Include pattern and palette helper functions (must come after declarations above)
 #include "face_task_list.h"
 
-int trans_x(int pos){
-  return pos % 8;
-}
-int trans_y(int pos){
-  return pos/8;
-}
-int trans_x_smol(int pos){
-  return pos % 3;
-}
-int trans_y_smol(int pos){
-  return pos/3;
+// ---- RTC HELPERS -----------------------------------------------------------
+
+// Read the RTC and update digits[] and date_array[] with the current time/date
+void access_rtc() {
+  now = rtc.now();
+  // 12-hour time: split hour into tens and ones
+  if (now.twelveHour() < 10) { digits[0] = 0; digits[1] = now.twelveHour(); }
+  else                        { digits[0] = 1; digits[1] = now.twelveHour() - 10; }
+  digits[2] = now.minute() / 10;
+  digits[3] = now.minute() % 10;
+  // Date: 3-letter month abbreviation + 2-digit day
+  for (int letter = 0; letter < 3; letter++) {
+    date_array[letter] = months[now.month() - 1][letter];
+  }
+  date_array[3] = now.day() / 10;
+  date_array[4] = now.day() % 10;
 }
 
-void display_time(bool colon, bool bg){ //if bg is true, cover the background with ink
-  if(!colon || digits[0]){
-    for(int dig = 0; dig < 4; dig++){
-      for(int i = 0; i<80; i++){
-        if((num[digits[dig]][i] && !bg) || (!num[digits[dig]][i] && bg)){
-          matrix.drawPixel((trans_x(i) + dig*8), trans_y(i), ink_color[dig]);
+// Return the DateTime of the second Sunday in March (DST start in North America)
+DateTime calc_dst_start() {
+  now = rtc.now();
+  DateTime this_day;
+  int day_of_month = 1;
+  for (int num_sunday = 0; num_sunday < 2; ) {
+    this_day = DateTime(now.year(), 3, day_of_month);
+    if (!this_day.dayOfTheWeek()) { // Sunday = 0
+      num_sunday++;
+    } else {
+      day_of_month++;
+    }
+  }
+  return this_day;
+}
+
+// Return the DateTime of the first Sunday in November (DST end in North America)
+DateTime calc_dst_end() {
+  now = rtc.now();
+  int day_of_month = 1;
+  DateTime this_day;
+  for (int num_sunday = 0; num_sunday < 1; ) {
+    this_day = DateTime(now.year(), 11, day_of_month);
+    if (!this_day.dayOfTheWeek()) {
+      num_sunday++;
+    } else {
+      day_of_month++;
+    }
+  }
+  return this_day;
+}
+
+// Return true if the current time falls within North American DST
+bool check_dst() {
+  return (calc_dst_start() <= rtc.now()) && (rtc.now() <= calc_dst_end());
+}
+
+// ---- COORDINATE HELPERS ----------------------------------------------------
+
+// Map a flat pixel index (0-79) to its X coordinate within an 8-wide glyph
+int trans_x(int pos)      { return pos % 8; }
+// Map a flat pixel index (0-79) to its Y coordinate within a 10-tall glyph
+int trans_y(int pos)      { return pos / 8; }
+// Map a flat pixel index (0-14) to its X coordinate within a 3-wide small glyph
+int trans_x_smol(int pos) { return pos % 3; }
+// Map a flat pixel index (0-14) to its Y coordinate within a 5-tall small glyph
+int trans_y_smol(int pos) { return pos / 3; }
+
+// ---- DISPLAY FUNCTIONS -----------------------------------------------------
+
+// Draw the four time digits onto the matrix.
+//   colon : when true AND the leading hour digit is 0, draw a colon separator
+//           and shift digits to better use the available width
+//   bg    : when false draw the lit (foreground) pixels in ink_color[];
+//           when true  draw the unlit (background) pixels in ink_color[]
+void display_time(bool colon, bool bg) {
+  if (!colon || digits[0]) {
+    // Both hour digits visible (or no colon requested): simple 4-digit layout
+    for (int dig = 0; dig < 4; dig++) {
+      for (int i = 0; i < 80; i++) {
+        if ((num[digits[dig]][i] && !bg) || (!num[digits[dig]][i] && bg)) {
+          matrix.drawPixel((trans_x(i) + dig * 8), trans_y(i), ink_color[dig]);
         }
       }
-    } return;
+    }
+    return;
   }
 
-  if(colon && bg){
-    matrix.fillRect(0, 0, 4, 10, ink);
-    for(int i = 0; i<80; i++){
-      if(!num[digits[1]][i]){
+  // Single-digit hour: shift layout and insert colon dots
+  if (colon && bg) {
+    matrix.fillRect(0, 0, 4, 10, 0); // blank leading space
+    for (int i = 0; i < 80; i++) {
+      if (!num[digits[1]][i]) {
         matrix.drawPixel(trans_x(i) + 4, trans_y(i), ink_color[1]);
       }
     }
-
-    matrix.fillRect(12, 0, 4, 2, ink);
-    matrix.fillRect(12, 8, 4, 2, ink);
-    matrix.fillRect(12, 0, 1, 10, ink);
-    matrix.fillRect(12, 4, 4, 2, ink);
-    matrix.fillRect(15, 0, 1, 10, ink);
-
-    for(int i = 0; i<80; i++){
-      if(!num[digits[2]][i]){
+    // Colon separator background
+    matrix.fillRect(12, 0, 4, 2, 0);
+    matrix.fillRect(12, 8, 4, 2, 0);
+    matrix.fillRect(12, 0, 1, 10, 0);
+    matrix.fillRect(12, 4, 4, 2, 0);
+    matrix.fillRect(15, 0, 1, 10, 0);
+    for (int i = 0; i < 80; i++) {
+      if (!num[digits[2]][i]) {
         matrix.drawPixel((trans_x(i) + 16), trans_y(i), ink_color[2]);
       }
-      if(!num[digits[3]][i]){
+      if (!num[digits[3]][i]) {
         matrix.drawPixel((trans_x(i) + 24), trans_y(i), ink_color[3]);
       }
-    } return;
+    }
+    return;
   }
 
-  if(colon && !bg){
-    for(int i = 0; i<80; i++){
-      if(num[digits[1]][i]){
-          matrix.drawPixel(trans_x(i) + 4, trans_y(i), ink);
+  if (colon && !bg) {
+    for (int i = 0; i < 80; i++) {
+      if (num[digits[1]][i]) {
+        matrix.drawPixel(trans_x(i) + 4, trans_y(i), 0);
       }
     }
-
-    matrix.fillRect(13, 2, 2, 2, ink);
-    matrix.fillRect(13, 6, 2, 2, ink);
-
-    for(int i = 0; i<80; i++){
-      if(num[digits[2]][i]){
-        matrix.drawPixel((trans_x(i) + 16), trans_y(i), ink);
+    // Draw colon dots
+    matrix.fillRect(13, 2, 2, 2, ink_color[1]);
+    matrix.fillRect(13, 6, 2, 2, ink_color[1]);
+    for (int i = 0; i < 80; i++) {
+      if (num[digits[2]][i]) {
+        matrix.drawPixel((trans_x(i) + 16), trans_y(i), ink_color[2]);
       }
-      if(num[digits[3]][i]){
-        matrix.drawPixel((trans_x(i) + 24), trans_y(i), ink);
+      if (num[digits[3]][i]) {
+        matrix.drawPixel((trans_x(i) + 24), trans_y(i), ink_color[3]);
+      }
+    }
+  }
+}
+
+// Draw the date (3-char month abbreviation + 2-digit day) in the bottom rows
+// using small 3×5 glyphs at the given color
+void display_date(uint16_t color) {
+  // Month abbreviation: three 3×5 letter glyphs starting at x=10, y=11
+  for (int place = 0; place < 3; place++) {
+    for (int i = 0; i < 15; i++) {
+      if (letters[date_array[place]][i]) {
+        matrix.drawPixel(10 + trans_x_smol(i) + place * 4, trans_y_smol(i) + 11, color);
+      }
+    }
+  }
+  // Day number: two 3×5 digit glyphs after the month abbreviation
+  for (int place = 3; place < 5; place++) {
+    for (int i = 0; i < 15; i++) {
+      if (small_num[date_array[place]][i]) {
+        matrix.drawPixel(11 + trans_x_smol(i) + place * 4, trans_y_smol(i) + 11, color);
       }
     }
   }
 }
 
-// void date(bool bg){ //if bg is true, cover the background with ink
-//   if(!bg){
-//     for(int place = 0; place<3; place++){
-//       for(int i = 0; i<15; i++){
-//         if(letters[date_places[place]][i]){
-//           matrix.drawPixel(10+ trans_x_smol(i)+ place*4, trans_y_smol(i)+11, ink_color[2]);
-//         }
-//       }
-//     }
-//     for(int place = 3; place<5; place++){
-//       for(int i = 0; i<15; i++){
-//         if(small_num[date_places[place]][i]){
-//           matrix.drawPixel(11+ trans_x_smol(i)+ place*4, trans_y_smol(i)+11, ink_color[3]);
-//         }
-//       }
-//     }
-//   }
-//   else{
-//     for(int place = 0; place<3; place++){
-//       for(int i = 0; i<15; i++){
-//         if(letters[date_places[place]][i]){
-//           matrix.drawPixel(10+ trans_x_smol(i)+ place*4, trans_y_smol(i)+11, ink_color[2]);
-//         }
-//       }
-//     }
-//     for(int place = 3; place<5; place++){
-//       for(int i = 0; i<15; i++){
-//         if(small_num[date_places[place]][i]){
-//           matrix.drawPixel(11+ trans_x_smol(i)+ place*4, trans_y_smol(i)+11, ink_color[3]);
-//         }
-//       }
-//     }
-//   }
-// }
-
-int blaze_num[] = {1,11,0,25,4,8,19};
-
-// void blaze_it(){
-//   for(int place = 0; place<5; place++){
-//     for(int i = 0; i<15; i++){
-//       if(letters[blaze_num[place]][i]){
-//         matrix.drawPixel(1+ trans_x_smol(i)+ place*4, trans_y_smol(i)+11, pride[0]);
-//       }
-//     }
-//   }
-//   for(int place = 5; place<7; place++){
-//     for(int i = 0; i<15; i++){
-//       if(letters[blaze_num[place]][i]){
-//         matrix.drawPixel(2+ trans_x_smol(i)+ place*4, trans_y_smol(i)+11, pride[0]);
-//       }
-//     }
-//   }
-//}
-
-int birthday_num[] = {1,8,17,19,7,3,0,24};
-void birthday(){
-  //matrix.fillRect(0, 11, 32, 8, 0);
-  for(int place = 0; place<8; place++){
-    for(int i = 0; i<15; i++){
-      if(!letters[birthday_num[place]][i]){
-        matrix.drawPixel(1+trans_x_smol(i)+ place*4, trans_y_smol(i)+11, 0);
-      }
-    }
-    matrix.drawFastVLine(place*4, 11, 5, 0);
-  }
-}
+// ---- SETUP -----------------------------------------------------------------
 
 void setup(void) {
   Serial.begin(9600);
@@ -293,47 +276,54 @@ void setup(void) {
 
   delay(100);
   now = rtc.now();
-  // Initialize matrix...
+
+  // Initialise the Protomatter matrix
   ProtomatterStatus status = matrix.begin();
   matrix.setRotation(rot);
 
   Serial.print("Protomatter begin() status: ");
   Serial.println((int)status);
-  if(status != PROTOMATTER_OK) {
+  if (status != PROTOMATTER_OK) {
     // DO NOT CONTINUE if matrix setup encountered an error.
-    for(;;);
+    for (;;);
   }
- matrix.drawPixel(4,4,0xffff);
+
+  // Perform an initial RTC read so digits[] and date_array[] are populated
+  access_rtc();
+
+  // Select starting colour palette and background pattern
+  current_palette = 1; // rainbow palette
+  change_palette();
+  switch_pattern(0);   // scrolling diagonal stripes
+
+  // Register and enable the scheduler tasks
+  face_scheduler.addTask(face_task);
+  face_scheduler.addTask(update_digits_task);
+  face_task.enable();
+  update_digits_task.enable();
 
   matrix.show();
-  delay(100);
-
-
-    //   for(int place = 0; place<3; place++){
-    //   for(int i = 0; i<15; i++){
-    //     if(letters[date_array[place]][i]){
-    //       matrix.drawPixel(10+ trans_x_smol(i)+ place*4, trans_y_smol(i)+11, ink_color[2]);
-    //     }
-    //   }
-    // }
-    // for(int place = 3; place<5; place++){
-    //   for(int i = 0; i<15; i++){
-    //     if(small_num[date_array[place]][i]){
-    //       matrix.drawPixel(11+ trans_x_smol(i)+ place*4, trans_y_smol(i)+11, ink_color[3]);
-    //     }
-    //   }
-    // }
-
-
-  //face_scheduler.addTask(face_task);
-  //face_scheduler.addTask(update_digits_task);
 }
 
-// LOOP - RUNS REPEATEDLY AFTER SETUP --------------------------------------
+// ---- LOOP ------------------------------------------------------------------
+
 void loop() {
+  // Run the scheduled tasks (background pattern + RTC digit update)
+  face_scheduler.execute();
 
- // face_scheduler.execute();
+  // Draw time digits in ink_color over the background pattern
+  display_time(true, false);
+
+  // Black separator line between time and date rows
+  matrix.drawFastHLine(0, 10, 32, 0);
+
+  // Draw date in a neutral grey
+  display_date(matrix.color565(128, 128, 128));
+
+  // Push frame buffer to the physical display
+  matrix.show();
+
+  // Advance the scroll counter for animated patterns
   scroll++;
-  if(scroll == 100){scroll = 0;}
-
+  if (scroll == 100) { scroll = 0; }
 }
