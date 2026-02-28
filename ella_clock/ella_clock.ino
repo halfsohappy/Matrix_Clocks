@@ -339,7 +339,7 @@ void loop() {
   if (draw_current_pattern) draw_current_pattern();  // 2. background pattern
   display_time(true);                                // 3. time digits
   matrix.drawFastHLine(0, 10, 32, 0);               // 4. separator row
-  display_date(matrix.color565(128, 128, 128));      // 5. date
+  display_date(WHITE);                               // 5. date (white on black for maximum readability)
 
   matrix.show();                                     // 6. swap to display
 }
