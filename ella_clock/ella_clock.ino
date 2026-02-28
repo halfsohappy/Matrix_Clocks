@@ -21,6 +21,10 @@
 #include <TaskSchedulerDeclarations.h>
 #include <TaskSchedulerSleepMethods.h>
 
+// Target frame period in milliseconds.  50 ms = 20 fps.
+// See matrix_clock for full rationale.
+#define FRAME_MS  50
+
 // Colour aliases that index into the colors[] array defined below
 #define RED colors[0]
 #define ORANGE colors[1]
@@ -313,26 +317,23 @@ void setup(void) {
 // ---- LOOP ------------------------------------------------------------------
 
 void loop() {
-  // Run the scheduled tasks (RTC digit update)
+  // Always service the scheduler (RTC read every 50ms).
   face_scheduler.execute();
 
-  // Draw the background pattern every frame so the back buffer is always
-  // fully repainted before digits are overlaid, preventing stale pixels.
+  // Rate-limit rendering to FRAME_MS per frame.
+  static unsigned long last_frame = 0;
+  unsigned long now_ms = millis();
+  if ((now_ms - last_frame) < FRAME_MS) return;
+  last_frame = now_ms;
+
+  // Advance animation counter once per rendered frame.
+  // Wrap at 600 (divisible by both 4 and 6) for clean palette cycling.
+  scroll = (scroll + 1) % 600;
+
   if (draw_current_pattern) draw_current_pattern();
-
-  // Draw time digits in ink_color over the background pattern
   display_time(true, false);
-
-  // Black separator line between time and date rows
   matrix.drawFastHLine(0, 10, 32, 0);
-
-  // Draw date in a neutral grey
+  matrix.fillRect(0, 11, 32, 5, 0);
   display_date(matrix.color565(128, 128, 128));
-
-  // Push frame buffer to the physical display
   matrix.show();
-
-  // Advance the scroll counter for animated patterns
-  scroll++;
-  if (scroll == 100) { scroll = 0; }
 }

@@ -60,6 +60,12 @@
 // 10 ms gives responsive feel while staying well inside the debounce window.
 #define BTN_POLL_MS      10
 
+// Target frame period in milliseconds.  50 ms = 20 fps — smooth for a clock
+// and slow enough that the scroll counter advances at a humanly-visible rate.
+// Rendering is skipped when less than FRAME_MS has elapsed since the last
+// rendered frame, so buttons and RTC reads remain responsive at all times.
+#define FRAME_MS         50
+
 // ============================================================
 //  LIBRARIES
 // ============================================================
@@ -515,28 +521,41 @@ void setup(void) {
 // ============================================================
 
 void loop() {
-  // Run scheduled tasks: button poll and RTC refresh.
+  // Always run the scheduler so button presses and RTC reads are serviced
+  // at their own rates (10 ms and 50 ms respectively) regardless of whether
+  // a frame is rendered this iteration.
   face_scheduler.execute();
 
-  // Draw the background pattern every frame so the back buffer is always
-  // fully repainted before digits are overlaid.  This prevents stale pixels
-  // (ghost digits, leftover palette colours) from accumulating between frames.
+  // Rate-limit rendering to FRAME_MS per frame.  Without this the loop runs
+  // at full CPU speed (~120 MHz on SAMD51), the scroll counter advances
+  // thousands of times per second making every animation a blur, and
+  // matrix.show() saturates the DMA controller.
+  static unsigned long last_frame = 0;
+  unsigned long now_ms = millis();
+  if ((now_ms - last_frame) < FRAME_MS) return;
+  last_frame = now_ms;
+
+  // Advance the animation counter exactly once per rendered frame.
+  // Wrap at 600: 600 = LCM(4,6) × 50, so (scroll % 4) and (scroll % 6)
+  // both reset cleanly to 0 at the wrap — no colour jump.
+  scroll = (scroll + 1) % 600;
+
+  // ── Back-buffer repaint ──────────────────────────────────────────────────
+  // 1. Background pattern fills the entire time area.
   if (draw_current_pattern) draw_current_pattern();
 
-  // Overlay the time digits in ink_color[] on top of the background.
+  // 2. Time digits drawn in ink_color[] on top of the background.
   display_time(ENABLE_COLON, false);
 
-  // Thin black separator line between the time and date rows.
+  // 3. Thin black separator between time and date rows.
   matrix.drawFastHLine(0, 10, 32, 0);
 
-  // Date in neutral grey.  Replace this call with blaze_it() or birthday()
-  // if you want a special overlay on a particular day.
+  // 4. Clear the date area then redraw.  Patterns like pattern_random cover
+  //    all 16 rows; clearing rows 11-15 here prevents their residual pixels
+  //    from bleeding through the non-lit gaps in the date glyphs.
+  matrix.fillRect(0, 11, 32, 5, 0);
   display_date(matrix.color565(128, 128, 128));
 
-  // Push the frame buffer to the physical LEDs.
+  // 5. Swap back buffer to display.
   matrix.show();
-
-  // Advance the scroll counter used by animated patterns.
-  scroll++;
-  if (scroll == 100) { scroll = 0; }
 }

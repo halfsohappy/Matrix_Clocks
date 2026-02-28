@@ -11,28 +11,24 @@
 // Each function fills the matrix with a colour pattern and is registered as
 // the callback for face_task by switch_pattern().
 
-// Animated scrolling diagonal stripes that advance each frame
+// Animated scrolling diagonal stripes that advance one position each frame.
+// Uses (i + scroll) % palette_size for a smooth, uniform directional scroll
+// with no V-chevron artefact and no colour jump when scroll wraps (because
+// the wrap value 600 is divisible by both 4 and 6).
 void pattern_scroll_diagonal() {
-  if (palette_size == 6) {
-    for (int i = 0; i < 48; i++) {
-      matrix.drawLine(0, i, i, 0, palette[(abs(i - scroll) % palette_size)]);
-    }
-  } else {
-    for (int i = 0; i < 24; i++) {
-      matrix.drawLine(0, 2*i,   2*i,   0, palette[(abs(i - scroll) % palette_size)]);
-      matrix.drawLine(0, 2*i+1, 2*i+1, 0, palette[(abs(i - scroll) % palette_size)]);
-    }
+  for (int i = 0; i < 24; i++) {
+    uint16_t color = palette[(i + scroll) % palette_size];
+    matrix.drawLine(0, 2*i,   2*i,   0, color);
+    matrix.drawLine(0, 2*i+1, 2*i+1, 0, color);
   }
 }
 
 // Static diagonal stripes (no animation)
 void pattern_diagonal() {
-  for (int i = 0; i < 48; i++) {
-    matrix.drawLine(0, i, i, 0, palette[i % palette_size]);
-  }
   for (int i = 0; i < 24; i++) {
-    matrix.drawLine(0, 2*i,   2*i,   0, palette[i % palette_size]);
-    matrix.drawLine(0, 2*i+1, 2*i+1, 0, palette[i % palette_size]);
+    uint16_t color = palette[i % palette_size];
+    matrix.drawLine(0, 2*i,   2*i,   0, color);
+    matrix.drawLine(0, 2*i+1, 2*i+1, 0, color);
   }
 }
 
