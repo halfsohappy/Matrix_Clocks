@@ -74,10 +74,16 @@ void pattern_v_thin() {
   }
 }
 
-// Thick vertical bands (uses same formula as h_thick but orientation differs)
+// Thick vertical bands, evenly dividing the 32-pixel display width among palette colours
 void pattern_v_thick() {
+  int band_w = 32 / palette_size;
   for (int i = 0; i < palette_size; i++) {
-    matrix.fillRect(i * (12 / palette_size), 0, 12 / palette_size, 11, palette[i]);
+    matrix.fillRect(i * band_w, 0, band_w, 11, palette[i]);
+  }
+  // Fill any remaining pixels (due to integer division) with the last colour
+  int covered = band_w * palette_size;
+  if (covered < 32) {
+    matrix.fillRect(covered, 0, 32 - covered, 11, palette[palette_size - 1]);
   }
 }
 
@@ -92,17 +98,19 @@ void pattern_random() {
 
 // ---- PATTERN SWITCHER ------------------------------------------------------
 
-// Set face_task to run the chosen background pattern
+// Point draw_current_pattern at the chosen background pattern function.
+// The main loop calls draw_current_pattern() every frame, so the back buffer
+// is always fully repainted before digits are overlaid.
 void switch_pattern(int pattern) {
   switch (pattern) {
-    case 0: face_task.setCallback(&pattern_scroll_diagonal); face_task.setInterval(100); break;
-    case 1: face_task.setCallback(&pattern_diagonal);        face_task.setInterval(25);  break;
-    case 2: face_task.setCallback(&pattern_blocks);          face_task.setInterval(25);  break;
-    case 3: face_task.setCallback(&pattern_h_thin);          face_task.setInterval(100); break;
-    case 4: face_task.setCallback(&pattern_h_thick);         face_task.setInterval(25);  break;
-    case 5: face_task.setCallback(&pattern_v_thin);  face_task.setInterval(100); break;
-    case 6: face_task.setCallback(&pattern_v_thick); face_task.setInterval(25);  break;
-    case 7: face_task.setCallback(&pattern_random);          face_task.setInterval(100); break;
+    case 0: draw_current_pattern = &pattern_scroll_diagonal; break;
+    case 1: draw_current_pattern = &pattern_diagonal;        break;
+    case 2: draw_current_pattern = &pattern_blocks;          break;
+    case 3: draw_current_pattern = &pattern_h_thin;          break;
+    case 4: draw_current_pattern = &pattern_h_thick;         break;
+    case 5: draw_current_pattern = &pattern_v_thin;          break;
+    case 6: draw_current_pattern = &pattern_v_thick;         break;
+    case 7: draw_current_pattern = &pattern_random;          break;
   }
 }
 
@@ -189,7 +197,7 @@ void change_pat_helper() {
   if (current_pattern == 8) { current_pattern = 0; }
 }
 
-// Stop the background pattern task
+// Stop the background pattern
 void disablePattern() {
-  face_task.disable();
+  draw_current_pattern = nullptr;
 }

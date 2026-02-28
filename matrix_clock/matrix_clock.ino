@@ -179,9 +179,14 @@ void access_rtc();
 void check_buttons();
 
 Scheduler face_scheduler;
-Task face_task(100, -1);                           // background pattern, interval set by switch_pattern()
 Task update_digits_task(50, -1, &access_rtc);      // RTC read every 50 ms
 Task btn_task(BTN_POLL_MS, -1, &check_buttons);    // button poll every BTN_POLL_MS
+
+// Function pointer to the active background pattern drawing function.
+// Set by switch_pattern() and called directly in loop() every frame so
+// the back buffer is always fully repainted before digits are overlaid.
+typedef void (*PatternFn)();
+PatternFn draw_current_pattern = nullptr;
 
 // face_task_list.h defines all pattern/palette helpers and must be included
 // here so it can reference the variables above.
@@ -209,7 +214,7 @@ void check_buttons() {
       (now_ms - last_pattern_press) > BTN_DEBOUNCE_MS) {
     last_pattern_press = now_ms;
     change_pat_helper();              // advance current_pattern
-    switch_pattern(current_pattern);  // set face_task callback and interval
+    switch_pattern(current_pattern);  // update draw_current_pattern function pointer
   }
 }
 
@@ -291,6 +296,12 @@ int trans_y_smol(int pos) { return pos / 3; } // flat index → small glyph row 
 void access_rtc() {
   now = rtc.now();
 
+  // Guard against DS3231 BCD rollover glitch that can momentarily return
+  // minute=60 at the top of each hour.  Skip the entire update in that case
+  // so digits[] always hold a valid 0-59 minute value.
+  int m = now.minute();
+  if (m > 59) return;
+
   int hour = now.twelveHour(); // 1–12
 
 #if ENABLE_DST
@@ -303,8 +314,8 @@ void access_rtc() {
   if (hour < 10) { digits[0] = 0; digits[1] = hour; }
   else           { digits[0] = 1; digits[1] = hour - 10; }
 
-  digits[2] = now.minute() / 10;
-  digits[3] = now.minute() % 10;
+  digits[2] = m / 10;
+  digits[3] = m % 10;
 
   for (int letter = 0; letter < 3; letter++) {
     date_array[letter] = months[now.month() - 1][letter];
@@ -491,10 +502,8 @@ void setup(void) {
   switch_pattern(DEFAULT_PATTERN);
 
   // Register and enable the scheduler tasks.
-  face_scheduler.addTask(face_task);
   face_scheduler.addTask(update_digits_task);
   face_scheduler.addTask(btn_task);
-  face_task.enable();
   update_digits_task.enable();
   btn_task.enable();
 
@@ -506,8 +515,13 @@ void setup(void) {
 // ============================================================
 
 void loop() {
-  // Run all scheduled tasks: button poll, background pattern draw, RTC refresh.
+  // Run scheduled tasks: button poll and RTC refresh.
   face_scheduler.execute();
+
+  // Draw the background pattern every frame so the back buffer is always
+  // fully repainted before digits are overlaid.  This prevents stale pixels
+  // (ghost digits, leftover palette colours) from accumulating between frames.
+  if (draw_current_pattern) draw_current_pattern();
 
   // Overlay the time digits in ink_color[] on top of the background.
   display_time(ENABLE_COLON, false);

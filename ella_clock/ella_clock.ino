@@ -108,11 +108,14 @@ int scroll = 0;
 void access_rtc();
 
 // SCHEDULER SETUP
-// face_task  : fires every 100 ms to redraw the animated background pattern
 // update_digits_task : fires every 50 ms to refresh digits[] from the RTC
+// draw_current_pattern is a function pointer (set by switch_pattern) called
+// directly in loop() every frame to ensure the back buffer is always fresh.
 Scheduler face_scheduler;
-Task face_task(100, -1);
 Task update_digits_task(50, -1, &access_rtc);
+
+typedef void (*PatternFn)();
+PatternFn draw_current_pattern = nullptr;
 
 // Include pattern and palette helper functions (must come after declarations above)
 #include "face_task_list.h"
@@ -122,11 +125,14 @@ Task update_digits_task(50, -1, &access_rtc);
 // Read the RTC and update digits[] and date_array[] with the current time/date
 void access_rtc() {
   now = rtc.now();
+  // Guard against DS3231 BCD rollover glitch (minute can momentarily read 60).
+  int m = now.minute();
+  if (m > 59) return;
   // 12-hour time: split hour into tens and ones
   if (now.twelveHour() < 10) { digits[0] = 0; digits[1] = now.twelveHour(); }
   else                        { digits[0] = 1; digits[1] = now.twelveHour() - 10; }
-  digits[2] = now.minute() / 10;
-  digits[3] = now.minute() % 10;
+  digits[2] = m / 10;
+  digits[3] = m % 10;
   // Date: 3-letter month abbreviation + 2-digit day
   for (int letter = 0; letter < 3; letter++) {
     date_array[letter] = months[now.month() - 1][letter];
@@ -298,9 +304,7 @@ void setup(void) {
   switch_pattern(0);   // scrolling diagonal stripes
 
   // Register and enable the scheduler tasks
-  face_scheduler.addTask(face_task);
   face_scheduler.addTask(update_digits_task);
-  face_task.enable();
   update_digits_task.enable();
 
   matrix.show();
@@ -309,8 +313,12 @@ void setup(void) {
 // ---- LOOP ------------------------------------------------------------------
 
 void loop() {
-  // Run the scheduled tasks (background pattern + RTC digit update)
+  // Run the scheduled tasks (RTC digit update)
   face_scheduler.execute();
+
+  // Draw the background pattern every frame so the back buffer is always
+  // fully repainted before digits are overlaid, preventing stale pixels.
+  if (draw_current_pattern) draw_current_pattern();
 
   // Draw time digits in ink_color over the background pattern
   display_time(true, false);

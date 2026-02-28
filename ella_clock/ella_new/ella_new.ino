@@ -370,10 +370,14 @@ void loop() {
   now = rtc.now();
 
   // Update time_hhmm[] from current RTC reading
-  if (now.twelveHour() < 10) { time_hhmm[0] = 0; time_hhmm[1] = now.twelveHour(); }
-  else                       { time_hhmm[0] = 1; time_hhmm[1] = now.twelveHour() - 10; }
-  time_hhmm[2] = now.minute() / 10;
-  time_hhmm[3] = now.minute() % 10;
+  // Guard against DS3231 BCD rollover glitch (minute can momentarily read 60).
+  int m = now.minute();
+  if (m <= 59) {
+    if (now.twelveHour() < 10) { time_hhmm[0] = 0; time_hhmm[1] = now.twelveHour(); }
+    else                       { time_hhmm[0] = 1; time_hhmm[1] = now.twelveHour() - 10; }
+    time_hhmm[2] = m / 10;
+    time_hhmm[3] = m % 10;
+  }
 
   // Advance the animated rainbow background one step
   diagonal_rainbow(scroll % 6);

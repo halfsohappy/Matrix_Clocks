@@ -109,10 +109,13 @@ int digits[] = {1,0,2,3};
 // Read the RTC and update the digits[] array with the current 12-hour time
 void update_digits(){
   now = rtc.now();
+  // Guard against DS3231 BCD rollover glitch (minute can momentarily read 60).
+  int m = now.minute();
+  if (m > 59) return;
   if(now.twelveHour() < 10){digits[1] = now.twelveHour(); digits[0] = 0;}
   else{digits[0] = 1; digits[1] = now.twelveHour()-10;}
-  digits[2] = (now.minute() / 10);
-  digits[3] = now.minute() % 10;
+  digits[2] = m / 10;
+  digits[3] = m % 10;
 }
 
 // Paint the background (non-digit) pixels of one digit position with color
