@@ -66,14 +66,15 @@ int digits[] = {1, 0, 2, 3};
 int date_array[] = {0, 0, 0, 0, 0};
 
 // Adafruit Protomatter matrix: 32 px wide, 4-bit colour depth, single chain,
-// 3 address pins (height inferred as 16), no double-buffering
+// 3 address pins (height inferred as 16), double-buffering enabled to
+// eliminate flickering and errant-line tearing
 Adafruit_Protomatter matrix(
   32,           // Width of matrix in pixels
   4,            // Bit depth, 1-6
   1, rgbPins,   // # of matrix chains, RGB pins
   3, addrPins,  // # of address pins, address pin array
   clockPin, latchPin, oePin,
-  false         // No double-buffering
+  true          // Double-buffering: eliminates flicker and errant-line tearing
 );
 
 // Named colour palette
@@ -230,7 +231,7 @@ void display_time(bool colon, bool bg) {
   if (colon && !bg) {
     for (int i = 0; i < 80; i++) {
       if (num[digits[1]][i]) {
-        matrix.drawPixel(trans_x(i) + 4, trans_y(i), 0);
+        matrix.drawPixel(trans_x(i) + 4, trans_y(i), ink_color[1]);
       }
     }
     // Draw colon dots

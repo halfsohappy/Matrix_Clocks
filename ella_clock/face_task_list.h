@@ -70,7 +70,7 @@ void pattern_h_thick() {
 // Thin vertical stripes, one stripe per palette colour per column
 void pattern_v_thin() {
   for (int i = 0; i < 32; i++) {
-    matrix.drawFastVLine(0, i, 11, palette[i % palette_size]);
+    matrix.drawFastVLine(i, 0, 11, palette[i % palette_size]);
   }
 }
 
@@ -85,7 +85,7 @@ void pattern_v_thick() {
 void pattern_random() {
   for (int x = 0; x < 32; x++) {
     for (int y = 0; y < 16; y++) {
-      matrix.drawPixel(x, y, palette[int(random(1) * palette_size)]);
+      matrix.drawPixel(x, y, palette[random(palette_size)]);
     }
   }
 }
@@ -100,8 +100,8 @@ void switch_pattern(int pattern) {
     case 2: face_task.setCallback(&pattern_blocks);          face_task.setInterval(25);  break;
     case 3: face_task.setCallback(&pattern_h_thin);          face_task.setInterval(100); break;
     case 4: face_task.setCallback(&pattern_h_thick);         face_task.setInterval(25);  break;
-    case 5: face_task.setCallback(&pattern_v_thin);                                      break;
-    case 6: face_task.setCallback(&pattern_h_thick);                                     break;
+    case 5: face_task.setCallback(&pattern_v_thin);  face_task.setInterval(100); break;
+    case 6: face_task.setCallback(&pattern_v_thick); face_task.setInterval(25);  break;
     case 7: face_task.setCallback(&pattern_random);          face_task.setInterval(100); break;
   }
 }
@@ -177,10 +177,10 @@ void change_palette() {
   }
 }
 
-// Cycle to the next palette (wraps at 12 back to 0)
+// Cycle to the next palette (wraps 11 → 1 to stay within valid range 1–11)
 void change_pal_helper() {
   current_palette += 1;
-  if (current_palette == 12) { current_palette = 0; }
+  if (current_palette == 12) { current_palette = 1; }
 }
 
 // Cycle to the next pattern (wraps at 8 back to 0)

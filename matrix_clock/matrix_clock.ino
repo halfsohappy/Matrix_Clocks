@@ -17,7 +17,8 @@
 //   • Optional colon separator with single-digit-hour shift
 //   • Optional North-American DST detection (adjusts the displayed hour only)
 //   • Adjustable display brightness
-//   • TaskScheduler for non-blocking RTC reads and pattern animation
+//   • TaskScheduler for non-blocking RTC reads, pattern animation,
+//     and button polling (BTN_POLL_MS interval, default 10 ms)
 //   • Special overlays: blaze_it(), birthday()
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -47,11 +48,17 @@
 
 // Button pin assignments (active-LOW with INPUT_PULLUP).
 // Change these to match wherever you wire your buttons.
-#define BTN_PALETTE_PIN  A0
-#define BTN_PATTERN_PIN  A1
+// NOTE: A0 = D14 = clockPin and A1 = D15 = latchPin on Metro M4, so those
+//       pins cannot be used for buttons.  D2 and D3 are safe choices.
+#define BTN_PALETTE_PIN  2
+#define BTN_PATTERN_PIN  3
 
 // Minimum milliseconds between button presses (debounce).
 #define BTN_DEBOUNCE_MS  200
+
+// How often (in milliseconds) the scheduler polls the button pins.
+// 10 ms gives responsive feel while staying well inside the debounce window.
+#define BTN_POLL_MS      10
 
 // ============================================================
 //  LIBRARIES
@@ -118,7 +125,7 @@ Adafruit_Protomatter matrix(
   1, rgbPins,
   3, addrPins,
   clockPin, latchPin, oePin,
-  false  // no double-buffering
+  true  // double-buffering: eliminates flicker and errant-line tearing
 );
 
 // ============================================================
@@ -167,13 +174,14 @@ int date_array[] = {0, 0, 0, 0, 0};
 //  TASK SCHEDULER
 // ============================================================
 
-// Forward declaration needed because update_digits_task references access_rtc
-// before the function definition appears below.
+// Forward declarations needed because tasks reference functions defined below.
 void access_rtc();
+void check_buttons();
 
 Scheduler face_scheduler;
-Task face_task(100, -1);                        // background pattern, interval set by switch_pattern()
-Task update_digits_task(50, -1, &access_rtc);   // RTC read every 50 ms
+Task face_task(100, -1);                           // background pattern, interval set by switch_pattern()
+Task update_digits_task(50, -1, &access_rtc);      // RTC read every 50 ms
+Task btn_task(BTN_POLL_MS, -1, &check_buttons);    // button poll every BTN_POLL_MS
 
 // face_task_list.h defines all pattern/palette helpers and must be included
 // here so it can reference the variables above.
@@ -485,8 +493,10 @@ void setup(void) {
   // Register and enable the scheduler tasks.
   face_scheduler.addTask(face_task);
   face_scheduler.addTask(update_digits_task);
+  face_scheduler.addTask(btn_task);
   face_task.enable();
   update_digits_task.enable();
+  btn_task.enable();
 
   matrix.show();
 }
@@ -496,10 +506,7 @@ void setup(void) {
 // ============================================================
 
 void loop() {
-  // Check for button presses and update palette/pattern if pressed.
-  check_buttons();
-
-  // Run scheduled tasks: background pattern draw + RTC digit refresh.
+  // Run all scheduled tasks: button poll, background pattern draw, RTC refresh.
   face_scheduler.execute();
 
   // Overlay the time digits in ink_color[] on top of the background.
